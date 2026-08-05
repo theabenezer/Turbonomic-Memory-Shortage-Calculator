@@ -1,0 +1,7 @@
+# Internal reference documents — keep out of the public site
+*.xlsx
+*.XLSX
+*.docx
+
+# OS noise
+.DS_Store
