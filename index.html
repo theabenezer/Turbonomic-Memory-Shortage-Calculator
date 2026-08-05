@@ -3,7 +3,7 @@
   ------------------------------------------------------------------
   Standalone + embeddable single-file web app.
   • Standalone: open this file in a browser, or host it anywhere.
-  • Embeddable: <iframe src="turbonomic-memory-calculator.html"></iframe>
+  • Embeddable: <iframe src="index.html"></iframe>
       - Append ?embed=1 to hide the hero/nav chrome for a clean inline embed.
       - The page posts its height to the parent (postMessage) for iframe auto-resize.
   Built with Carbon Design System Web Components (IBM CDN) + IBM Plex.
@@ -24,6 +24,7 @@
 <script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/button.min.js"></script>
 <script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/loading.min.js"></script>
 <script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/accordion.min.js"></script>
+<script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/toggle.min.js"></script>
 <script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/tooltip.min.js"></script>
 
 <style>
@@ -118,6 +119,23 @@
   cds-slider{width:100%;--cds-slider-track-color:var(--gray-20)}
   .adv{display:block;margin-top:16px;border:1px solid #d0e2ff;border-left:3px solid var(--cds-blue-60);background:#edf5ff}
   .adv-body{padding:4px 12px 10px}
+  .adv-sub{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--cds-blue-70);margin:18px 0 2px;padding-top:12px;border-top:1px solid #d0e2ff}
+  .seller-field{background:#fff8e1;margin:0 -12px;padding:16px 12px;border-left:3px solid var(--cds-yellow-30)}
+
+  /* Hosts & density + projection table */
+  .tiles.t4{grid-template-columns:repeat(4,1fr)}
+  @media (max-width:760px){.tiles.t4{grid-template-columns:repeat(2,1fr)}}
+  .projwrap{overflow-x:auto;border:1px solid var(--gray-20)}
+  .proj{width:100%;border-collapse:collapse;font-size:12.5px;min-width:680px}
+  .proj th{background:var(--gray-10);font-weight:600;text-align:right;padding:9px 10px;border-bottom:1px solid var(--gray-20);white-space:nowrap}
+  .proj th:first-child{text-align:left}
+  .proj td{padding:8px 10px;border-bottom:1px solid var(--gray-10);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .proj td:first-child{text-align:left;color:var(--gray-70)}
+  .proj tr:last-child td{border-bottom:0}
+  .proj .neg{color:var(--cds-red-60);font-weight:600}
+  .proj .pos{color:var(--cds-green-60);font-weight:600}
+  .proj tr.netrow td{background:#fff8e1;font-weight:600}
 
   .actions{display:flex;gap:12px;flex-wrap:wrap;padding:20px 24px;border-top:1px solid var(--border-subtle);background:var(--gray-10)}
 
@@ -364,9 +382,23 @@
           </cds-slider>
         </div>
 
+        <div class="field seller-field">
+          <div class="row"><label for="i_dens">Turbo-optimized VM density (VMs/host)</label></div>
+          <span class="hint">Seller input: target density after Turbonomic placement optimization</span>
+          <cds-number-input id="i_dens" data-key="density" value="30" min="1" step="1"
+            label="" hide-label="true" size="lg"></cds-number-input>
+          <span class="hint" id="densNote"></span>
+        </div>
+
+        <div class="field">
+          <div class="row"><label for="i_decom">Decommission freed hosts</label></div>
+          <span class="hint">On: shed hosts for license savings. Off: keep them powered as headroom for maximum runway and deferred purchases.</span>
+          <cds-toggle id="i_decom" label-text="" labelA="Keep as headroom" labelB="Decommission"></cds-toggle>
+        </div>
+
         <!-- Advanced -->
         <cds-accordion class="adv">
-          <cds-accordion-item title="Advanced assumptions (8 more inputs)">
+          <cds-accordion-item title="Advanced assumptions (13 more inputs)">
             <div class="adv-body">
               <div class="field">
                 <div class="row"><label>Max safe utilization</label><span class="val"><input class="val-in" id="v_safe" data-vkey="safe" type="number" min="60" max="95" step="1" value="85" inputmode="numeric" aria-label="Max safe utilization percent">%</span></div>
@@ -377,7 +409,8 @@
               </div>
               <div class="field">
                 <div class="row"><label for="i_mps">Memory per server (GB)</label></div>
-                <cds-number-input id="i_mps" data-key="mps" value="1024" min="1" step="64" label="" hide-label="true"></cds-number-input>
+                <span class="hint">Physical RAM per host (Simer benchmark: dual 20-core, 512 GB)</span>
+                <cds-number-input id="i_mps" data-key="mps" value="512" min="1" step="64" label="" hide-label="true"></cds-number-input>
               </div>
               <div class="field">
                 <div class="row"><label for="i_lead">Hardware lead time (months)</label></div>
@@ -409,6 +442,32 @@
                 <cds-slider data-key="wacc" min="0" max="20" step="1" value="8" label-text="" hide-label="true" hide-text-input="true">
                   <cds-slider-input aria-label="Cost of capital percent"></cds-slider-input>
                 </cds-slider>
+              </div>
+
+              <div class="adv-sub">Hypervisor licensing &amp; Turbonomic pricing</div>
+              <div class="field">
+                <div class="row"><label for="i_cpus">CPUs per server</label></div>
+                <cds-number-input id="i_cpus" data-key="cpus" value="2" min="1" step="1" label="" hide-label="true"></cds-number-input>
+              </div>
+              <div class="field">
+                <div class="row"><label for="i_corespc">Cores per CPU</label></div>
+                <span class="hint" id="coreNote"></span>
+                <cds-number-input id="i_corespc" data-key="corespc" value="20" min="1" step="2" label="" hide-label="true"></cds-number-input>
+              </div>
+              <div class="field">
+                <div class="row"><label for="i_vmwlic">VMware license per host ($/yr)</label></div>
+                <span class="hint">vSphere Foundation / Enterprise Plus per host (Simer: $8,500)</span>
+                <cds-number-input id="i_vmwlic" data-key="vmwlic" value="8500" min="0" step="250" label="" hide-label="true"></cds-number-input>
+              </div>
+              <div class="field">
+                <div class="row"><label for="i_vmwmaint">VMware maintenance per host ($/yr)</label></div>
+                <span class="hint">Support &amp; maintenance, ~20% of license (Simer: $1,750)</span>
+                <cds-number-input id="i_vmwmaint" data-key="vmwmaint" value="1750" min="0" step="250" label="" hide-label="true"></cds-number-input>
+              </div>
+              <div class="field">
+                <div class="row"><label for="i_turbovm">Turbonomic cost per VM ($/yr)</label></div>
+                <span class="hint">List $268.80; IDIQ discounted $241.92. Volume tiers apply at 10k+/100k+ VMs.</span>
+                <cds-number-input id="i_turbovm" data-key="turbovm" value="241.92" min="0" step="10" label="" hide-label="true"></cds-number-input>
               </div>
             </div>
           </cds-accordion-item>
@@ -520,6 +579,41 @@
               <div class="bar bar-good"><i id="ba_w_bar" style="width:0"></i></div>
             </div>
           </div>
+        </div>
+
+        <!-- Hosts & density (Kevin) -->
+        <div class="block reveal" id="rv_dens">
+          <h4>Hosts &amp; density (placement optimization)</h4>
+          <p class="cap" id="densCap">—</p>
+          <div class="tiles t4">
+            <div class="tile">
+              <div class="k">Current density</div>
+              <div class="v" id="d2_now">—</div>
+              <div class="d" id="d2_now_d">VMs/host</div>
+            </div>
+            <div class="tile">
+              <div class="k">With Turbonomic</div>
+              <div class="v up" id="d2_used">—</div>
+              <div class="d" id="d2_used_d">VMs/host</div>
+            </div>
+            <div class="tile accent">
+              <div class="k">Hosts freed</div>
+              <div class="v" id="d2_freed">—</div>
+              <div class="d" id="d2_freed_d">—</div>
+            </div>
+            <div class="tile">
+              <div class="k">Post-Turbo exhaustion</div>
+              <div class="v" id="d2_run">—</div>
+              <div class="d" id="d2_run_d">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5-year projection (Kevin) -->
+        <div class="block reveal" id="rv_proj">
+          <h4>3&ndash;5 year projection: with vs. without Turbonomic</h4>
+          <p class="cap">Cost curves compared honestly: hosts are bought only when growth exceeds the fleet you own, and savings emerge from the difference. No asset-value booking.</p>
+          <div class="projwrap"><table class="proj" id="projTable"></table></div>
         </div>
 
         <!-- Detailed analysis -->
@@ -645,14 +739,59 @@ function calcModel(x){
 
   const dataFlag = D0 > 1.05*V0;          // B29 / B72
 
+  // --- hosts, density & 5-year fleet economics (Kevin / Simer / NZ cost-curve method) ---
+  const dTarget = Math.max(1, x.density);
+  const licHost = Math.max(0, x.vmwlic) + Math.max(0, x.vmwmaint);   // $/host/yr
+  const tvm = Math.max(0, x.turbovm);
+  const decom = !!x.decom;
+  const coresHost = Math.max(1, x.cpus) * Math.max(1, x.corespc);
+  const hostsNow = Math.max(1, Math.ceil(round6(I*1024/M)));
+  const densNow = N0/hostsNow;
+  const mImpl1 = D1*1024/N0;                              // consumed GB/VM after reclaim
+  const densMax = Math.max(1, (M*s)/Math.max(0.0001, mImpl1)); // memory-feasible ceiling
+  const densUsed = Math.min(dTarget, densMax);
+  const densClamped = dTarget > densMax + 1e-9;
+  const hostsWith0 = Math.max(1, Math.ceil(round6(N0/densUsed)));
+  const hostsFreed = Math.max(0, hostsNow - hostsWith0);
+  // post-Turbo runway: keep mode = full capacity (reclaim runway t1); decommission shrinks capacity
+  const IWith = decom ? hostsWith0*M/1024 : I;
+  const KWith = IWith*s;
+  const t0Turbo = D1>=KWith ? 0 : (r<=0 ? MCAP : Math.min(MCAP, 12*ln(KWith/D1)/ln(1+r)));
+  // year-by-year cost curves: buy only when needed > owned; savings = curve difference
+  const proj = [];
+  let peakWo = hostsNow, peakW = decom ? hostsWith0 : hostsNow;
+  let cumCapWo = 0, cumWithAll = 0, cumTurbo = 0, cumNet = 0, cumLicSav = 0;
+  for (let y = 1; y <= 5; y++){
+    const vmsY  = Math.max(0, Math.round(N0*pow(1+r, y)));
+    const needWo = Math.max(1, Math.ceil(round6(vmsY/Math.max(0.0001, densNow))));
+    const needW  = Math.max(1, Math.ceil(round6(vmsY/densUsed)));
+    const buyWo = Math.max(0, needWo-peakWo); peakWo = Math.max(peakWo, needWo);
+    const buyW  = Math.max(0, needW-peakW);   peakW  = Math.max(peakW, needW);
+    const capWo = buyWo*C, capW = buyW*C;
+    const licWo = needWo*licHost;             // without: license the fleet you run
+    const licW  = peakW*licHost;              // with: you own (and license) the kept fleet
+    const tCost = vmsY*tvm;
+    const licSav = licWo-licW;
+    const annualNet = (capWo+licWo) - (capW+licW+tCost);
+    cumCapWo += capWo; cumWithAll += capW+tCost; cumTurbo += tCost;
+    cumNet += annualNet; cumLicSav += licSav;
+    proj.push({y, vms:vmsY, hostsWo:needWo, hostsW:needW, def:Math.max(0,needWo-needW),
+      capWo, capW, licWo, licW, licSav, tCost, annualNet, cumCapWo, cumWithAll, cumNet, cumLicSav});
+  }
+  const y1Net = proj[0].annualNet, net3 = proj[2].cumNet, net5 = proj[4].cumNet;
+  const roi5 = cumTurbo>0 ? (net5+cumTurbo)/cumTurbo : 0;
+
   return {N0,g,r,u,I,s,C,M,L,TL,f,rho,Dcap,W,w,
     V0,D0,K,headroom,mImpl,Usrv,t0,orderBy,STATUS,
     buySize,servers,E,RecBase,Rtb,D1,t1,dRaw,d,Bfold,E1,
-    Eliminated,Replanned,Pdef,Vdef,Total,valPct,strictCash,E36,E36T,dataFlag};
+    Eliminated,Replanned,Pdef,Vdef,Total,valPct,strictCash,E36,E36T,dataFlag,
+    dTarget,licHost,tvm,decom,coresHost,hostsNow,densNow,mImpl1,densMax,densUsed,densClamped,
+    hostsWith0,hostsFreed,IWith,KWith,t0Turbo,proj,y1Net,net3,net5,cumTurbo,roi5};
 }
 
 /* ---------------- formatting ---------------- */
-const fmtUSD = v => '$'+Math.round(v).toLocaleString('en-US');
+const fmtUSD = v => (v<0?'-':'')+'$'+Math.abs(Math.round(v)).toLocaleString('en-US');
+const fmtUSDm = v => Math.abs(v)>=1e6 ? (v<0?'-':'')+'$'+Math.abs(v/1e6).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1})+'M' : fmtUSD(v);
 const fmtUSDk = v => v>=1000 ? '$'+Math.round(v/1000).toLocaleString('en-US')+'K' : fmtUSD(v);
 const fmtNum = v => Math.round(v).toLocaleString('en-US');
 const fmt1 = v => v.toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1});
@@ -669,7 +808,8 @@ function futureDate(months){
 
 /* ---------------- state ---------------- */
 const DEFAULTS = {vms:25000,gb:16,growth:10,util:75,inst:1200,cost:35000,rho:20,
-  safe:85,mps:1024,lead:6,cycle:4,disp:40,defcap:18,win:12,wacc:8};
+  safe:85,mps:512,lead:6,cycle:4,disp:40,defcap:18,win:12,wacc:8,
+  density:30,decom:0,cpus:2,corespc:20,vmwlic:8500,vmwmaint:1750,turbovm:241.92};
 let state = {...DEFAULTS};
 
 /* ---------------- number count-up ---------------- */
@@ -774,6 +914,41 @@ function render(o, animate){
     document.getElementById('ba_w_bar').style.width=(o.E36T/maxBA*100)+'%';
   }, animate?300:0);
 
+  // hosts & density (Kevin)
+  document.getElementById('densCap').textContent =
+    'Current estate: '+fmtNum(o.hostsNow)+' hosts of '+fmtNum(o.M)+' GB. Max supportable density at your post-reclaim memory footprint ('+fmt1(o.mImpl1)+' GB consumed/VM at '+Math.round(o.s*100)+'% safe ceiling): '+fmt1(o.densMax)+' VMs/host.';
+  document.getElementById('d2_now').textContent=fmt1(o.densNow);
+  document.getElementById('d2_now_d').textContent='VMs/host · '+fmtNum(o.hostsNow)+' hosts';
+  document.getElementById('d2_used').textContent=fmt1(o.densUsed);
+  document.getElementById('d2_used_d').textContent = o.densClamped
+    ? 'VMs/host (target '+fmt1(o.dTarget)+' clamped to memory-feasible max)'
+    : 'VMs/host (seller target)';
+  document.getElementById('d2_freed').textContent=fmtNum(o.hostsFreed);
+  document.getElementById('d2_freed_d').textContent = (o.decom?'decommissioned':'kept as headroom')+' · '+fmtNum(o.hostsWith0)+' hosts remain in use';
+  document.getElementById('d2_run').textContent = (o.STATUS===2||o.STATUS===4||o.t0Turbo>=240) ? '20+ yrs' : fmt1(o.t0Turbo)+' mo';
+  document.getElementById('d2_run_d').textContent = o.decom ? 'after consolidating to '+fmtNum(o.hostsWith0)+' hosts' : 'hosts kept: full capacity + reclaim';
+  // seller-input note under the density field
+  const dn=document.getElementById('densNote');
+  if(dn) dn.textContent = o.densClamped
+    ? 'Note: '+fmt1(o.dTarget)+' VMs/host exceeds what '+fmtNum(o.M)+' GB hosts can safely hold at this estate’s memory footprint. Using '+fmt1(o.densMax)+' VMs/host.'
+    : 'Memory-feasible max at current footprint: '+fmt1(o.densMax)+' VMs/host.';
+  const cn=document.getElementById('coreNote');
+  if(cn) cn.textContent = fmtNum(o.coresHost)+' cores/host. Reference: VCF at $350/core-yr ≈ '+fmtUSD(o.coresHost*350)+'/host-yr; vSphere Foundation at $135/core-yr ≈ '+fmtUSD(o.coresHost*135)+'/host-yr.';
+
+  // 5-year projection table
+  const P=o.proj;
+  const cell=(v,cls)=>'<td'+(cls?' class="'+cls+'"':'')+'>'+v+'</td>';
+  let T='<tr><th>Metric</th><th>Today</th>'+P.map(p=>'<th>Year '+p.y+'</th>').join('')+'</tr>';
+  T+='<tr>'+cell('Total VMs')+cell(fmtNum(o.N0))+P.map(p=>cell(fmtNum(p.vms))).join('')+'</tr>';
+  T+='<tr>'+cell('Hosts needed, without Turbo')+cell(fmtNum(o.hostsNow))+P.map(p=>cell(fmtNum(p.hostsWo))).join('')+'</tr>';
+  T+='<tr>'+cell('Hosts needed, with Turbo')+cell(fmtNum(o.hostsWith0))+P.map(p=>cell(fmtNum(p.hostsW))).join('')+'</tr>';
+  T+='<tr>'+cell('Hosts deferred / freed')+cell(fmtNum(o.hostsFreed))+P.map(p=>cell(fmtNum(p.def))).join('')+'</tr>';
+  T+='<tr>'+cell('Cumulative host CapEx, without Turbo')+cell('$0')+P.map(p=>cell(fmtUSDm(p.cumCapWo),'neg')).join('')+'</tr>';
+  T+='<tr>'+cell('Cumulative host CapEx + Turbo cost, with Turbo')+cell('$0')+P.map(p=>cell(fmtUSDm(p.cumWithAll),'pos')).join('')+'</tr>';
+  T+='<tr>'+cell('Annual VMware license + maintenance savings')+cell('$0')+P.map(p=>cell(fmtUSDm(p.licSav))).join('')+'</tr>';
+  T+='<tr class="netrow">'+cell('Cumulative net savings with Turbo')+cell('$0')+P.map(p=>cell(fmtUSDm(p.cumNet))).join('')+'</tr>';
+  document.getElementById('projTable').innerHTML=T;
+
   // detailed analysis
   document.getElementById('d_demand').textContent=fmt1(o.D0)+' TB';
   document.getElementById('d_vram').textContent=fmt1(o.V0)+' TB';
@@ -795,6 +970,7 @@ function render(o, animate){
   }else{
     msg='At your current growth you exhaust safe memory in <b>'+fmt1(o.t0)+' months</b>, forcing an unplanned <b>'+fmtUSD(o.E)+'</b> purchase. With Turbonomic you can avoid or defer about <b>'+fmtUSD(o.Total)+'</b> ('+(o.valPct*100).toFixed(0)+'% of that exposure) while extending runway by <b>'+fmt1(o.d)+' months</b>.';
   }
+  msg += ' Placement optimization at <b>'+fmt1(o.densUsed)+' VMs/host</b> frees <b>'+fmtNum(o.hostsFreed)+'</b> of '+fmtNum(o.hostsNow)+' hosts ('+(o.decom?'decommissioned':'kept as headroom')+'). Year-1 net savings <b>'+fmtUSD(o.y1Net)+'</b>; 5-year cumulative net savings <b>'+fmtUSD(o.net5)+'</b> after VMware license and Turbonomic subscription costs.';
   document.getElementById('execMsg').innerHTML=msg;
 
   document.getElementById('foot').innerHTML =
@@ -806,7 +982,7 @@ function render(o, animate){
 
 /* ---------------- reveal groups ---------------- */
 function revealAll(stagger){
-  const ids=['rv_head','rv_tiles','rv_split','rv_ba','rv_detail','rv_exec','rv_cta','rv_export'];
+  const ids=['rv_head','rv_tiles','rv_split','rv_ba','rv_dens','rv_proj','rv_detail','rv_exec','rv_cta','rv_export'];
   ids.forEach((id,i)=>{
     const el=document.getElementById(id);
     setTimeout(()=>el.classList.add('in'), stagger?i*110:0);
@@ -819,6 +995,8 @@ const STEPS=[
   'Projecting compounding memory demand…',
   'Locating your safe-capacity ceiling…',
   'Modeling Turbonomic reclaim &amp; deferral…',
+  'Optimizing VM-to-host density…',
+  'Projecting 5-year fleet economics…',
   'Quantifying avoidable spend…'
 ];
 const RING_C=2*Math.PI*42;
@@ -831,7 +1009,7 @@ function runLoader(done){
   ring.style.strokeDasharray=RING_C;
   loader.classList.add('show');
   // hide result groups for re-reveal
-  ['rv_head','rv_tiles','rv_split','rv_ba','rv_detail','rv_exec','rv_cta','rv_export'].forEach(id=>document.getElementById(id).classList.remove('in'));
+  ['rv_head','rv_tiles','rv_split','rv_ba','rv_dens','rv_proj','rv_detail','rv_exec','rv_cta','rv_export'].forEach(id=>document.getElementById(id).classList.remove('in'));
   let i=0;
   const total=STEPS.length;
   function step(){
@@ -892,12 +1070,20 @@ function bindInputs(){
     state={...DEFAULTS};
     // reset control values in the DOM
     document.querySelectorAll('[data-key]').forEach(el=>{ const k=el.getAttribute('data-key'); if(k in state) el.value=String(state[k]); });
+    const tgr=document.getElementById('i_decom'); if(tgr) tgr.checked=false;
     syncValueLabels();
     runLoader(()=>{ render(calcModel(state), true); revealAll(true); });
   });
   document.getElementById('pdfBtn').addEventListener('click', ()=>{ buildPrintReport(); window.print(); });
   document.getElementById('csvBtn').addEventListener('click', downloadCSV);
   window.addEventListener('beforeprint', buildPrintReport);
+  // freed-hosts disposition toggle (keep as headroom <-> decommission)
+  const tg=document.getElementById('i_decom');
+  if(tg){
+    const readToggle=()=>{ setTimeout(()=>{ const v=tg.checked?1:0; if(v!==state.decom){ state.decom=v; liveUpdate(); } },0); };
+    tg.addEventListener('cds-toggle-changed', readToggle);
+    tg.addEventListener('click', readToggle);
+  }
   // editable blue value fields: typing updates the model and moves the slider
   document.querySelectorAll('.val-in').forEach(inp=>{
     inp.addEventListener('input', ()=>{
@@ -922,7 +1108,11 @@ const INPUT_DEFS=[
   ['Max safe utilization','safe','%'],['Avg cost per server','cost','$'],['Memory per server','mps','GB'],
   ['Hardware purchase cycle','cycle','years'],['Hardware lead time','lead','months'],
   ['Unplanned buy displacing planned refresh','disp','%'],['Turbonomic memory reclaim','rho','%'],
-  ['Refresh deferral cap','defcap','months'],['Purchase coverage window','win','months'],['Cost of capital','wacc','%']
+  ['Refresh deferral cap','defcap','months'],['Purchase coverage window','win','months'],['Cost of capital','wacc','%'],
+  ['Turbo-optimized VM density target','density','VMs/host'],['Decommission freed hosts (1=yes)','decom',''],
+  ['CPUs per server','cpus',''],['Cores per CPU','corespc',''],
+  ['VMware license per host','vmwlic','$/yr'],['VMware maintenance per host','vmwmaint','$/yr'],
+  ['Turbonomic cost per VM','turbovm','$/yr']
 ];
 function monthsText(o){ return o.STATUS===1?'0 (over now)':(o.STATUS===2||o.STATUS===4?'20+ years':fmt1(o.t0)+' months'); }
 function buildPrintReport(){
@@ -952,7 +1142,12 @@ function buildPrintReport(){
     R('Total Turbonomic value',fmtUSD(o.Total)+' ('+(o.valPct*100).toFixed(0)+'% of exposure)')+
     R('Strict cash view (eliminated + NPV)',fmtUSD(o.strictCash))+
     R('36-month exposure without Turbonomic',fmtUSD(o.E36))+
-    R('36-month exposure with Turbonomic',fmtUSD(o.E36T));
+    R('36-month exposure with Turbonomic',fmtUSD(o.E36T))+
+    R('Current VM density',fmt1(o.densNow)+' VMs/host ('+fmtNum(o.hostsNow)+' hosts)')+
+    R('Density with Turbonomic',fmt1(o.densUsed)+' VMs/host'+(o.densClamped?' (clamped)':''))+
+    R('Hosts freed by Turbonomic',fmtNum(o.hostsFreed)+' ('+(o.decom?'decommissioned':'kept as headroom')+')')+
+    R('Year-1 net savings (fleet economics)',fmtUSD(o.y1Net))+
+    R('5-year cumulative net savings',fmtUSD(o.net5));
   document.getElementById('printReport').innerHTML=
     '<div class="pr-top"><span class="brand">IBM Turbonomic</span><span class="date">Generated '+today+'</span></div>'+
     '<h1>Memory Shortage &amp; Unplanned Spend Report</h1>'+
@@ -1003,6 +1198,29 @@ function downloadCSV(){
   O('Strict cash view',Math.round(o.strictCash),'USD');
   O('36-month exposure without Turbonomic',Math.round(o.E36),'USD');
   O('36-month exposure with Turbonomic',Math.round(o.E36T),'USD');
+  O('Current hosts',o.hostsNow,'hosts');
+  O('Current VM density',o.densNow.toFixed(2),'VMs/host');
+  O('Memory-feasible max density',o.densMax.toFixed(2),'VMs/host');
+  O('Density used (with Turbo)',o.densUsed.toFixed(2),'VMs/host'+(o.densClamped?' (target clamped)':''));
+  O('Hosts needed with Turbo (today)',o.hostsWith0,'hosts');
+  O('Hosts freed by Turbo',o.hostsFreed,o.decom?'decommissioned':'kept as headroom');
+  O('Post-Turbo exhaustion',(o.t0Turbo>=240?'240+':o.t0Turbo.toFixed(2)),'months');
+  O('Year-1 net savings',Math.round(o.y1Net),'USD');
+  O('3-year cumulative net savings',Math.round(o.net3),'USD');
+  O('5-year cumulative net savings',Math.round(o.net5),'USD');
+  O('5-year cumulative Turbonomic cost',Math.round(o.cumTurbo),'USD');
+  O('5-year ROI (gross savings / Turbo cost)',o.roi5.toFixed(2),'x');
+  o.proj.forEach(p=>{
+    const Y=(f,v,u2)=>rows.push(['Projection Y'+p.y,f,v,u2||'']);
+    Y('Total VMs',p.vms,'VMs');
+    Y('Hosts needed without Turbo',p.hostsWo,'hosts');
+    Y('Hosts needed with Turbo',p.hostsW,'hosts');
+    Y('Hosts deferred/freed',p.def,'hosts');
+    Y('Cumulative host CapEx without Turbo',Math.round(p.cumCapWo),'USD');
+    Y('Cumulative host CapEx + Turbo cost with Turbo',Math.round(p.cumWithAll),'USD');
+    Y('Annual VMware license + maintenance savings',Math.round(p.licSav),'USD');
+    Y('Cumulative net savings with Turbo',Math.round(p.cumNet),'USD');
+  });
   const csv='\ufeff'+rows.map(r=>r.map(csvEscape).join(',')).join('\r\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');

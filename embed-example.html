@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Embed example | Turbonomic Memory Calculator</title>
+<style>
+  body{font-family:'IBM Plex Sans',Arial,sans-serif;margin:0;background:#f4f4f4;color:#161616}
+  .page{max-width:1100px;margin:0 auto;padding:40px 20px}
+  h1{font-weight:300;font-size:32px}
+  code{background:#e0e0e0;padding:2px 6px;border-radius:3px;font-family:'IBM Plex Mono',monospace;font-size:13px}
+  .note{color:#525252;font-size:14px;line-height:1.6}
+  iframe{width:100%;border:0;display:block;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+</style>
+</head>
+<body>
+  <div class="page">
+    <h1>Embedding the calculator</h1>
+    <p class="note">
+      This is a sample host page. The calculator below is the full latest version, embedded
+      by live reference, so it always reflects the newest design and math. It auto-resizes
+      to fit its content: no scrollbars, no fixed height guessing. Copy the snippet below
+      into any IBM/Turbonomic page.
+    </p>
+    <p class="note">
+      Prefer a compact inline widget without the hero banner? Append <code>?embed=1</code>
+      to the src and the marketing header is hidden automatically.
+    </p>
+
+    <!-- ===== EMBED SNIPPET (copy this) ===== -->
+    <iframe id="turboCalc"
+      src="index.html"
+      title="IBM Turbonomic Memory Savings Calculator"
+      loading="lazy"
+      style="width:100%;border:0;height:2800px"></iframe>
+
+    <script>
+      // Auto-resize the iframe to the calculator's reported height.
+      window.addEventListener('message', function (e) {
+        if (e.data && e.data.turbonomicCalcHeight) {
+          document.getElementById('turboCalc').style.height = e.data.turbonomicCalcHeight + 'px';
+        }
+      });
+    </script>
+    <!-- ===== /EMBED SNIPPET ===== -->
+
+    <p class="note" style="margin-top:32px">
+      <strong>Standalone use:</strong> just open
+      <code>index.html</code> directly, or host it anywhere (it is already wired for
+      GitHub Pages in this repo).
+      It has no build step and no dependencies beyond the IBM CDN it already references.
+    </p>
+  </div>
+</body>
+</html>
