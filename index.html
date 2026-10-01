@@ -1,15 +1,24 @@
 <!doctype html>
 <!--
-  IBM Turbonomic — Infrastructure Capacity & Reclamation Calculator
-  ------------------------------------------------------------------
+  IBM Turbonomic — Infrastructure Capacity & Reclamation Calculator  (v4)
+  ------------------------------------------------------------------------
   Standalone + embeddable single-file web app.
   • Standalone: open this file in a browser, or host it anywhere.
   • Embeddable: <iframe src="index.html"></iframe>
       - Append ?embed=1 to hide the hero/nav chrome for a clean inline embed.
       - The page posts its height to the parent (postMessage) for iframe auto-resize.
+  • Share: every input can be carried in the URL (?vms=…&hosts=…). "Copy share link" builds it.
   Built with Carbon Design System Web Components (IBM CDN) + IBM Plex.
-  Formula model is a 1:1 port of the verified v2 spreadsheet model
-  (cell references in comments map to Turbo - Memory_Shortage_Calculator_v2.xlsx).
+
+  v4 model (one 5-year cost curve, with vs. without Turbonomic):
+    - Hosts × memory per host = installed memory. Installed × utilization = memory in use.
+    - Both scenarios buy a host only when memory in use passes the safe ceiling of the hosts they own.
+    - Turbonomic shrinks memory in use by the reclaim %, which (a) pushes the next purchase out and
+      (b) lets VMs be consolidated to fewer hosts at the target utilization; freed hosts drop out of
+      VMware licensing and are redeployed before any new host is bought.
+    - Turbonomic cost = VMs × effective price per VM per year, charged every year.
+    - Net savings = (servers + VMware without) − (servers + VMware + Turbonomic with).
+    The memory-runway math (months to exhaustion) is unchanged from the verified v2 spreadsheet.
 -->
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -23,17 +32,9 @@
 <script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/number-input.min.js"></script>
 <script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/slider.min.js"></script>
 <script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/button.min.js"></script>
-<script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/loading.min.js"></script>
 <script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/accordion.min.js"></script>
-<script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/toggle.min.js"></script>
-<script type="module" src="https://1.www.s81c.com/common/carbon/web-components/version/v2.58.0/tooltip.min.js"></script>
 
 <style>
-  /* ============================================================
-     Carbon design tokens (defined locally so custom UI is robust
-     even before component CSS loads). Values are the official
-     Carbon v11 / IBM palette.
-     ============================================================ */
   :root {
     --cds-blue-60:#0f62fe; --cds-blue-70:#0043ce; --cds-blue-80:#002d9c;
     --cds-purple-60:#8a3ffc; --cds-purple-70:#6929c4;
@@ -57,22 +58,13 @@
 
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
-  body{
-    font-family:var(--plex); color:var(--text-primary);
-    background:var(--white); -webkit-font-smoothing:antialiased;
-    line-height:1.4;
-  }
+  body{font-family:var(--plex);color:var(--text-primary);background:var(--white);-webkit-font-smoothing:antialiased;line-height:1.4}
   a{color:var(--cds-blue-60);text-decoration:none}
   a:hover{text-decoration:underline}
-
   .wrap{max-width:1312px;margin:0 auto;padding:0 24px}
 
   /* ---------- Hero ---------- */
-  .hero{
-    position:relative; color:var(--text-primary);
-    background:#edf5ff; /* Carbon Blue 10 — IBM's light-blue layer token */
-    border-bottom:1px solid var(--border-subtle);
-  }
+  .hero{position:relative;color:var(--text-primary);background:#edf5ff;border-bottom:1px solid var(--border-subtle)}
   .hero .wrap{padding-top:20px;padding-bottom:56px}
   .topbar{display:flex;align-items:center;gap:14px;padding:14px 0 36px}
   .ibm-logo{height:26px;width:auto;display:block}
@@ -81,11 +73,7 @@
   .topbar .kicker{font-size:14px;letter-spacing:.02em;color:var(--gray-100)}
   .crumbs{font-size:13px;color:var(--gray-70);margin-bottom:28px}
   .crumbs a{color:var(--cds-blue-60)}
-  .hero h1{
-    font-weight:300; font-size:clamp(32px,4.5vw,54px); line-height:1.12;
-    letter-spacing:0; margin:0 0 20px; max-width:24ch; text-wrap:balance;
-    color:var(--gray-100);
-  }
+  .hero h1{font-weight:300;font-size:clamp(32px,4.5vw,54px);line-height:1.12;letter-spacing:0;margin:0 0 20px;max-width:24ch;text-wrap:balance;color:var(--gray-100)}
   .hero .lede{font-size:clamp(16px,2vw,20px);font-weight:300;max-width:60ch;margin:0 0 26px;line-height:1.5;color:var(--gray-70)}
   .hero .stats{display:flex;flex-wrap:wrap;gap:44px;margin-top:34px}
   .hero .stat .n{font-size:36px;font-weight:300;letter-spacing:0;color:var(--cds-blue-60)}
@@ -95,7 +83,6 @@
   .app{padding:48px 0 8px}
   .grid{display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:32px;align-items:start}
   @media (max-width:940px){.grid{grid-template-columns:1fr;gap:24px}}
-
   .panel{min-width:0;background:var(--layer);border:1px solid var(--border-subtle);box-shadow:var(--shadow-card)}
   .panel-h{padding:20px 24px;border-bottom:1px solid var(--border-subtle)}
   .panel-h .eyebrow{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--cds-blue-70);font-weight:600}
@@ -106,28 +93,89 @@
   .inputs{padding:8px 24px 24px}
   .field{padding:16px 0;border-bottom:1px solid var(--gray-10)}
   .field:last-child{border-bottom:0}
-  .field .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+  .field .row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .field .lab{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
   .field label{font-size:14px;font-weight:500;color:var(--text-primary)}
   .field .hint{font-size:12px;color:var(--text-secondary);margin-top:3px;display:block}
   .field .val{font-family:var(--plex-mono);font-size:15px;font-weight:600;color:var(--cds-blue-70);white-space:nowrap}
-  .val-in{font-family:inherit;font-size:inherit;font-weight:inherit;color:inherit;
-    border:0;border-bottom:1px dashed var(--cds-blue-60);background:transparent;
-    width:3.4ch;text-align:right;padding:0 1px;cursor:text}
+  .val-in{font-family:inherit;font-size:inherit;font-weight:inherit;color:inherit;border:0;border-bottom:1px dashed var(--cds-blue-60);background:transparent;width:3.4ch;text-align:right;padding:0 1px;cursor:text}
   .val-in:focus{outline:2px solid var(--cds-blue-60);outline-offset:2px;border-bottom-color:transparent}
   .val-in::-webkit-outer-spin-button,.val-in::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .val-in{-moz-appearance:textfield;appearance:textfield}
   cds-number-input{width:100%}
   cds-slider{width:100%;--cds-slider-track-color:var(--gray-20)}
-  cds-slider-input{display:none} /* text input is hidden everywhere (hide-text-input); the empty element otherwise adds phantom width on small screens */
+  cds-slider-input{display:none}
   .adv{display:block;margin-top:16px;border:1px solid #d0e2ff;border-left:3px solid var(--cds-blue-60);background:#edf5ff}
   .adv-body{padding:4px 12px 10px}
-  .adv-sub{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
-    color:var(--cds-blue-70);margin:18px 0 2px;padding-top:12px;border-top:1px solid #d0e2ff}
-  .seller-field{background:#fff8e1;margin:0 -12px;padding:16px 12px;border-left:3px solid var(--cds-yellow-30)}
+  .adv-sub{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--cds-blue-70);margin:18px 0 2px;padding-top:12px;border-top:1px solid #d0e2ff}
 
-  /* Hosts & density + projection table */
+  /* info button + explanation box */
+  .info{flex:0 0 auto;width:17px;height:17px;border-radius:50%;border:1px solid var(--gray-50);background:#fff;color:var(--gray-70);
+    font:600 10px/1 var(--plex-mono);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+  .info:hover,.field.open .info{border-color:var(--cds-blue-60);color:var(--cds-blue-60)}
+  .infobox{display:none;font-size:12.5px;line-height:1.5;color:var(--gray-80);background:var(--gray-10);border-left:2px solid var(--cds-blue-60);padding:9px 11px;margin:9px 0 2px}
+  .field.open .infobox{display:block}
+  .infobox b{font-weight:600}
+  /* customer-data vs estimate tag */
+  .tag{flex:0 0 auto;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:2px 7px;border-radius:10px;cursor:pointer;border:1px solid;user-select:none;white-space:nowrap}
+  .tag.e{background:#fff8e1;color:#8e6a00;border-color:#f1dd94}
+  .tag.c{background:#defbe6;color:#0e6027;border-color:#a7f0ba}
+  .tag:hover{filter:brightness(.96)}
+  .auto{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--gray-70);cursor:pointer;white-space:nowrap}
+  .auto input{margin:0}
+  .legendtags{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--text-secondary);padding:12px 0 4px;flex-wrap:wrap}
+  .pricenote{font-family:var(--plex-mono);font-size:12px;color:var(--cds-blue-70);margin-top:6px}
+
+  .actions{display:flex;gap:12px;flex-wrap:wrap;padding:20px 24px;border-top:1px solid var(--border-subtle);background:var(--gray-10)}
+
+  /* ---------- Results ---------- */
+  .results{position:relative;min-height:520px}
+  .res-body{padding:24px}
+  @media (max-width:520px){.res-body{padding:18px 16px}.inputs{padding:8px 16px 16px}.panel-h{padding:16px}.actions{padding:16px}.hero .stats{gap:28px 32px}}
+
+  .status{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;padding:5px 11px;border-radius:16px;letter-spacing:.02em;text-transform:uppercase}
+  .st-warn{background:#fff8e1;color:#8e6a00}
+  .st-risk{background:#fff1f1;color:var(--cds-red-60)}
+  .st-good{background:#edf5ff;color:var(--cds-blue-70)}
+  .st-ok{background:#defbe6;color:var(--cds-green-60)}
+  .hl h3{margin:12px 0 6px;font-size:20px;font-weight:400;letter-spacing:0;line-height:1.4;text-wrap:balance}
+  .hl h3 b{font-weight:600}
+  .hl .sub{font-size:14px;color:var(--text-secondary);margin:0;line-height:1.5}
+
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--gray-20);border:1px solid var(--gray-20);margin:18px 0}
   .tiles.t4{grid-template-columns:repeat(4,1fr)}
+  @media (max-width:1230px) and (min-width:941px){.tiles{grid-template-columns:1fr}.tiles.t4{grid-template-columns:repeat(2,1fr)}}
   @media (max-width:760px){.tiles.t4{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:680px){.tiles{grid-template-columns:1fr}}
+  .tile{background:#fff;padding:18px 18px 20px}
+  .tile .k{font-size:12px;color:var(--text-secondary);letter-spacing:.02em}
+  .tile .v{font-size:clamp(24px,2.4vw,30px);font-weight:600;letter-spacing:-.02em;margin-top:8px;font-variant-numeric:tabular-nums;line-height:1}
+  .tile .d{font-size:12px;color:var(--text-secondary);margin-top:7px}
+  .tile .v.pos{color:var(--cds-green-60)} .tile .v.neg{color:var(--cds-red-60)} .tile .v.up{color:var(--cds-blue-70)}
+  .tile.hero5{background:#edf5ff}
+
+  .block{margin:26px 0}
+  .block h4{font-size:13px;font-weight:600;letter-spacing:.02em;margin:0 0 4px;text-transform:uppercase;color:var(--gray-80)}
+  .block .cap{font-size:12px;color:var(--text-secondary);margin:0 0 14px}
+
+  /* with vs without comparison */
+  .cmpwrap{border:1px solid var(--gray-20);overflow-x:auto}
+  .cmp{width:100%;border-collapse:collapse;font-size:13.5px;min-width:440px}
+  .cmp th{background:var(--gray-10);font-weight:600;text-align:right;padding:11px 12px;border-bottom:1px solid var(--gray-20);white-space:nowrap;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  .cmp th:first-child{text-align:left}
+  .cmp th.w{color:var(--cds-blue-70)}
+  .cmp td{padding:10px 12px;border-bottom:1px solid var(--gray-10);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .cmp td:first-child{text-align:left;color:var(--gray-70);white-space:normal}
+  .cmp td.w{color:var(--cds-blue-70);font-weight:500}
+  .cmp tr.tot td{font-weight:600;border-top:2px solid var(--gray-100);border-bottom:0;font-size:14.5px}
+  .cmp tr.sec td{background:var(--gray-10);font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--gray-70);padding:6px 12px}
+  .netline{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;padding:14px 12px;border:1px solid var(--gray-20);border-top:0}
+  .netline .l{font-size:13px;color:var(--gray-70)}
+  .netline .v{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+  .netline .v.pos{color:var(--cds-green-60)} .netline .v.neg{color:var(--cds-red-60)}
+  .netline.pos{background:#defbe6} .netline.neg{background:#fff1f1}
+
+  /* year table */
   .projwrap{overflow-x:auto;border:1px solid var(--gray-20)}
   .proj{width:100%;border-collapse:collapse;font-size:12.5px;min-width:680px}
   .proj th{background:var(--gray-10);font-weight:600;text-align:right;padding:9px 10px;border-bottom:1px solid var(--gray-20);white-space:nowrap}
@@ -135,135 +183,50 @@
   .proj td{padding:8px 10px;border-bottom:1px solid var(--gray-10);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   .proj td:first-child{text-align:left;color:var(--gray-70)}
   .proj tr:last-child td{border-bottom:0}
+  .proj tr.sec td{background:var(--gray-10);font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--gray-70);padding:5px 10px}
   .proj .neg{color:var(--cds-red-60);font-weight:600}
   .proj .pos{color:var(--cds-green-60);font-weight:600}
   .proj tr.netrow td{background:#fff8e1;font-weight:600}
+  .proj td.w{color:var(--cds-blue-70)}
 
-  .actions{display:flex;gap:12px;flex-wrap:wrap;padding:20px 24px;border-top:1px solid var(--border-subtle);background:var(--gray-10)}
-
-  /* ---------- Results ---------- */
-  .results{position:relative;min-height:520px}
-  .res-body{padding:24px}
-
-  .headline{display:grid;grid-template-columns:auto 1fr;gap:26px;align-items:center;
-    padding:8px 4px 22px;border-bottom:1px solid var(--gray-10)}
-  @media (max-width:520px){
-    .headline{grid-template-columns:1fr;justify-items:center;text-align:center}
-    .hero .stats{gap:28px 32px}
-    .res-body{padding:18px 16px}
-    .inputs{padding:8px 16px 16px}
-    .panel-h{padding:16px}
-    .actions{padding:16px}
-  }
-
-  /* Gauge */
-  .gauge{position:relative;width:196px;height:196px;flex:0 0 auto}
-  .gauge svg{transform:rotate(-90deg)}
-  .gauge .track{fill:none;stroke:var(--gray-20);stroke-width:14}
-  .gauge .prog{fill:none;stroke-width:14;stroke-linecap:round;
-    transition:stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1),stroke .6s ease}
-  .gauge .center{position:absolute;inset:24px;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;text-align:center}
-  .gauge .num{font-size:40px;font-weight:300;letter-spacing:0;line-height:1;font-variant-numeric:tabular-nums}
-  .gauge .unit{font-size:10px;color:var(--text-secondary);margin-top:7px;text-transform:uppercase;
-    letter-spacing:.04em;line-height:1.45;max-width:104px}
-
-  .hl-copy .status{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;
-    padding:5px 11px;border-radius:16px;letter-spacing:.02em;text-transform:uppercase}
-  .hl-copy h3{margin:14px 0 8px;font-size:20px;font-weight:400;letter-spacing:0;line-height:1.4;text-wrap:balance}
-  .hl-copy h3 b{font-weight:600}
-  .hl-copy .sub{font-size:14px;color:var(--text-secondary);margin:0;line-height:1.5}
-  .st-ok{background:#defbe6;color:var(--cds-green-60)}
-  .st-warn{background:#fff8e1;color:#8e6a00}
-  .st-risk{background:#fff1f1;color:var(--cds-red-60)}
-  .st-good{background:#edf5ff;color:var(--cds-blue-70)}
-
-  /* Metric tiles */
-  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--gray-20);
-    border:1px solid var(--gray-20);margin:22px 0}
-  /* mid-width band: results column is narrow while the 2-column layout is active */
-  @media (max-width:1230px) and (min-width:941px){
-    .tiles{grid-template-columns:1fr}
-    .tiles.t4{grid-template-columns:repeat(2,1fr)}
-  }
-  @media (max-width:680px){.tiles{grid-template-columns:1fr}}
-  .tile{background:#fff;padding:18px 18px 20px}
-  .tile .k{font-size:12px;color:var(--text-secondary);letter-spacing:.02em;display:flex;align-items:center;gap:6px}
-  .tile .v{font-size:clamp(24px,2.4vw,30px);font-weight:600;letter-spacing:-.02em;margin-top:8px;font-variant-numeric:tabular-nums;line-height:1}
-  .tile .d{font-size:12px;color:var(--text-secondary);margin-top:7px}
-  .tile.accent .v{color:var(--cds-green-60)}
-  .tile .up{color:var(--cds-blue-70)}
-
-  /* Split bar */
-  .block{margin:26px 0}
-  .block h4{font-size:13px;font-weight:600;letter-spacing:.02em;margin:0 0 4px;text-transform:uppercase;color:var(--gray-80)}
-  .block .cap{font-size:12px;color:var(--text-secondary);margin:0 0 14px}
-  .splitbar{height:32px;display:flex;overflow:hidden;background:var(--gray-10)}
-  .splitbar span{height:100%;transition:width 1s cubic-bezier(.16,1,.3,1);min-width:0}
-  .seg-elim{background:var(--cds-green-60)} .seg-rep{background:var(--cds-cyan-50)} .seg-def{background:var(--cds-purple-60)}
-  .legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:12px}
-  .legend .li{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--gray-80)}
-  .legend .sw{width:12px;height:12px;flex:0 0 auto}
-  .legend .li b{font-variant-numeric:tabular-nums}
-
-  /* Detailed analysis */
+  /* detail */
   .detail{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   @media (max-width:620px){.detail{grid-template-columns:1fr}}
   @media (max-width:1230px) and (min-width:941px){.detail{grid-template-columns:1fr}}
   .dcol{border:1px solid var(--gray-20);padding:16px 18px}
   .dcol .t{font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
-  .drow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
-    padding:10px 0;border-bottom:1px solid var(--gray-10);font-size:13.5px}
+  .drow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:10px 0;border-bottom:1px solid var(--gray-10);font-size:13.5px}
   .drow:last-child{border-bottom:0}
   .drow span{color:var(--gray-70)}
   .drow b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
   @media (max-width:380px){.drow{flex-wrap:wrap}.drow b{white-space:normal}}
-
-  /* Before / after */
-  .ba{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  @media (max-width:520px){.ba{grid-template-columns:1fr}}
-  .ba .col{border:1px solid var(--gray-20);padding:16px}
-  .ba .col .t{font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em}
-  .ba .col .m{font-size:24px;font-weight:600;margin-top:8px;font-variant-numeric:tabular-nums}
-  .bar{height:8px;background:var(--gray-10);margin-top:14px;overflow:hidden}
-  .bar i{display:block;height:100%;transition:width 1.1s cubic-bezier(.16,1,.3,1)}
-  .bar-risk i{background:var(--cds-red-60)}
-  .bar-good i{background:var(--cds-green-50)}
 
   .exec{background:var(--gray-10);border-left:3px solid var(--cds-blue-60);padding:18px 20px;margin:24px 0 6px}
   @media (max-width:520px){.exec{padding:16px}}
   .exec p{margin:0;font-size:15px;line-height:1.55}
   .exec b{font-weight:600}
   .foot{font-size:11.5px;color:var(--gray-60);margin-top:16px;line-height:1.5}
-  .databanner{display:none;align-items:flex-start;gap:10px;background:#fff8e1;border:1px solid #f5d97a;
-    padding:14px 16px;margin:0 0 20px;font-size:13px;line-height:1.55;color:#684b00}
+  .databanner{display:none;align-items:flex-start;gap:10px;background:#fff8e1;border:1px solid #f5d97a;padding:14px 16px;margin:0 0 20px;font-size:13px;line-height:1.55;color:#684b00}
   .databanner.show{display:flex}
   .databanner svg{flex:0 0 auto;margin-top:1px}
+  .restored{display:none;font-size:12px;color:var(--gray-70);background:var(--gray-10);padding:8px 12px;margin:0 0 16px}
+  .restored.show{display:block}
+  .restored a{cursor:pointer}
 
-  /* ---------- Loading overlay (the cinematic part) ---------- */
-  .loader{position:absolute;inset:0;background:rgba(255,255,255,.96);backdrop-filter:blur(2px);
-    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;z-index:20;
-    opacity:0;visibility:hidden;transition:opacity .35s ease,visibility .35s ease}
+  /* ---------- Loading overlay ---------- */
+  .loader{position:absolute;inset:0;background:rgba(255,255,255,.96);backdrop-filter:blur(2px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;z-index:20;opacity:0;visibility:hidden;transition:opacity .35s ease,visibility .35s ease}
   .loader.show{opacity:1;visibility:visible}
   .loader .ring{position:relative;width:96px;height:96px}
   .loader .ring svg{transform:rotate(-90deg)}
   .loader .ring .rt{fill:none;stroke:var(--gray-20);stroke-width:6}
-  .loader .ring .rp{fill:none;stroke:url(#lg);stroke-width:6;stroke-linecap:round;
-    stroke-dasharray:264;stroke-dashoffset:264;transition:stroke-dashoffset .5s cubic-bezier(.4,0,.2,1)}
-  .loader .ring .spin{position:absolute;inset:0;border:3px solid transparent;border-top-color:var(--cds-blue-60);
-    border-radius:50%;animation:spin .9s linear infinite}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .loader .pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    font-family:var(--plex-mono);font-size:19px;font-weight:600;color:var(--gray-90)}
+  .loader .ring .rp{fill:none;stroke:url(#lg);stroke-width:6;stroke-linecap:round;stroke-dasharray:264;stroke-dashoffset:264;transition:stroke-dashoffset .5s cubic-bezier(.4,0,.2,1)}
+  .loader .pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--plex-mono);font-size:19px;font-weight:600;color:var(--gray-90)}
   .loader .steps{width:min(360px,80%);text-align:center}
-  .loader .stepline{font-size:15px;font-weight:500;color:var(--gray-90);min-height:22px;
-    transition:opacity .3s ease;letter-spacing:.01em}
+  .loader .stepline{font-size:15px;font-weight:500;color:var(--gray-90);min-height:22px;transition:opacity .3s ease;letter-spacing:.01em}
   .loader .sub{font-size:12.5px;color:var(--text-secondary);margin-top:8px}
   .loader .track2{height:3px;background:var(--gray-20);margin-top:18px;overflow:hidden}
-  .loader .track2 i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--cds-blue-60),var(--cds-purple-60));
-    transition:width .45s cubic-bezier(.4,0,.2,1)}
+  .loader .track2 i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--cds-blue-60),var(--cds-purple-60));transition:width .45s cubic-bezier(.4,0,.2,1)}
 
-  /* reveal animation for result groups */
   .reveal{opacity:0;transform:translateY(10px)}
   .reveal.in{opacity:1;transform:none;transition:opacity .55s ease,transform .55s cubic-bezier(.16,1,.3,1)}
 
@@ -275,7 +238,9 @@
   .sources a:hover{color:var(--cds-blue-60)}
 
   /* ---------- Export / print report ---------- */
-  .export-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--gray-10)}
+  .export-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:14px;padding-top:14px;border-top:1px solid var(--gray-10)}
+  .copied{font-size:12px;color:var(--cds-green-60);display:none}
+  .copied.show{display:inline}
   #printReport{display:none}
   @media print{
     @page{size:A4;margin:12mm}
@@ -297,15 +262,19 @@
     .pr-grid .half{flex:1}
     #printReport h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px}
     .pr-table{width:100%;border-collapse:collapse;font-size:10.5px;margin-bottom:12px}
-    .pr-table td{padding:4.5px 6px;border-bottom:1px solid #e0e0e0}
-    .pr-table td:last-child{text-align:right;font-weight:600;white-space:nowrap}
+    .pr-table td,.pr-table th{padding:4.5px 6px;border-bottom:1px solid #e0e0e0;text-align:left}
+    .pr-table th{font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:#525252;background:#f4f4f4}
+    .pr-table td.n,.pr-table th.n{text-align:right;white-space:nowrap}
+    .pr-table td.b{font-weight:600}
+    .pr-table tr.tot td{font-weight:600;border-top:2px solid #161616}
+    .pr-tag{font-size:8.5px;text-transform:uppercase;letter-spacing:.03em;padding:1px 5px;border-radius:8px;border:1px solid #c6c6c6;color:#525252;white-space:nowrap}
+    .pr-tag.c{background:#defbe6;color:#0e6027;border-color:#a7f0ba}
+    .pr-tag.e{background:#fff8e1;color:#8e6a00;border-color:#f1dd94}
     .pr-foot{font-size:9px;color:#6f6f6f;margin-top:12px;line-height:1.5}
   }
 
-  /* embed mode hides hero + outer chrome */
   body.embed .hero, body.embed .disclaimer .brandline, body.embed .sources{display:none}
   body.embed .app{padding-top:20px}
-
   .cta-note{font-size:12.5px;color:var(--text-secondary);margin-top:10px}
 </style>
 
@@ -349,149 +318,150 @@
       <div class="panel-h">
         <div class="eyebrow">Step 1</div>
         <h2>Your environment</h2>
-        <p>Adjust the values to match your estate. Results update as you go.</p>
+        <p>Adjust the values to match your estate. Results update as you go. Click <b>i</b> on any field to see what it means and where the default comes from.</p>
       </div>
 
       <div class="inputs" id="inputs">
-        <div class="field">
-          <div class="row"><label for="i_vms">Total VMs</label></div>
-          <span class="hint">Current virtual machine count across the estate</span>
-          <cds-number-input id="i_vms" data-key="vms" value="25000" min="1" step="500"
-            label="" hide-label="true" size="lg"></cds-number-input>
+        <div class="legendtags">
+          <span class="tag e" style="cursor:default">Our estimate</span>
+          <span class="tag c" style="cursor:default">From customer</span>
+          <span>Fields switch to “From customer” when you edit them. Click a tag to change it.</span>
         </div>
 
-        <div class="field">
-          <div class="row"><label for="i_gb">Avg memory per VM (GB)</label></div>
-          <span class="hint">Configured vRAM assigned per VM</span>
-          <cds-number-input id="i_gb" data-key="gb" value="16" min="1" step="1"
-            label="" hide-label="true" size="lg"></cds-number-input>
+        <div class="field" data-field="vms">
+          <div class="row"><div class="lab"><label for="i_vms">Total VMs</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="vms">Our estimate</span></div></div>
+          <span class="hint">Virtual machines across the estate today</span>
+          <div class="infobox">How many VMs you run today, across all clusters. <b>Default:</b> 25,000, a typical mid-size estate. This is usually the one number sellers know for sure.</div>
+          <cds-number-input id="i_vms" data-key="vms" value="25000" min="1" step="500" label="" hide-label="true"></cds-number-input>
         </div>
 
-        <div class="field">
-          <div class="row"><label>Annual growth</label><span class="val"><input class="val-in" id="v_growth" data-vkey="growth" type="number" min="0" max="40" step="1" value="10" inputmode="numeric" aria-label="Annual growth percent">%</span></div>
-          <span class="hint">Net estate growth per year (compounding)</span>
-          <cds-slider data-key="growth" min="0" max="40" step="1" value="10" label-text="" hide-label="true" hide-text-input="true">
-            <cds-slider-input aria-label="Annual growth percent"></cds-slider-input>
-          </cds-slider>
+        <div class="field" data-field="gb">
+          <div class="row"><div class="lab"><label for="i_gb">Avg memory assigned per VM (GB)</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="gb">Our estimate</span></div></div>
+          <span class="hint">Configured vRAM per VM in vCenter, not what it actually uses</span>
+          <div class="infobox">The memory each VM is given on average. VMs rarely use all of it, which is where reclaim comes from. <b>Default:</b> 16 GB, a common average. <b>Used for:</b> total assigned memory, and the cap on how much Turbonomic can reclaim.</div>
+          <cds-number-input id="i_gb" data-key="gb" value="16" min="1" step="1" label="" hide-label="true"></cds-number-input>
         </div>
 
-        <div class="field">
-          <div class="row"><label>Current memory utilization</label><span class="val"><input class="val-in" id="v_util" data-vkey="util" type="number" min="30" max="100" step="1" value="75" inputmode="numeric" aria-label="Current memory utilization percent">%</span></div>
-          <span class="hint">Consumed ÷ installed, as reported by vCenter</span>
-          <cds-slider data-key="util" min="30" max="100" step="1" value="75" label-text="" hide-label="true" hide-text-input="true">
-            <cds-slider-input aria-label="Current memory utilization percent"></cds-slider-input>
-          </cds-slider>
+        <div class="field" data-field="hosts">
+          <div class="row"><div class="lab"><label for="i_hosts">Number of hosts</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="hosts">Our estimate</span></div>
+            <label class="auto" for="hostsAuto"><input type="checkbox" id="hostsAuto" checked /> Auto</label></div>
+          <span class="hint" id="hostsHint">Physical servers running the VMs. On Auto we estimate it from the VM count.</span>
+          <div class="infobox">The physical servers in the estate. <b>Auto:</b> VMs × memory per VM × share actually in use, divided by memory per host at your utilization. Turn Auto off and type the real count when you have it. <b>Used for:</b> installed memory (hosts × memory per host), today's VM density, and every host-related cost.</div>
+          <cds-number-input id="i_hosts" data-key="hosts" value="782" min="1" step="10" label="" hide-label="true"></cds-number-input>
         </div>
 
-        <div class="field">
-          <div class="row"><label for="i_inst">Total installed memory (TB)</label></div>
-          <span class="hint">Sum of physical host RAM across the estate</span>
-          <cds-number-input id="i_inst" data-key="inst" value="1200" min="1" step="50"
-            label="" hide-label="true" size="lg"></cds-number-input>
+        <div class="field" data-field="mps">
+          <div class="row"><div class="lab"><label for="i_mps">Memory per host (GB)</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="mps">Our estimate</span></div></div>
+          <span class="hint" id="instHint">—</span>
+          <div class="infobox">RAM installed in each host. <b>Default:</b> 512 GB, a dual-socket 20-core server (Simer's benchmark). Use 1,024 GB for larger hosts. <b>Used for:</b> installed memory, how many VMs fit per host, and the size of each new host you'd buy.</div>
+          <cds-number-input id="i_mps" data-key="mps" value="512" min="64" step="64" label="" hide-label="true"></cds-number-input>
         </div>
 
-        <div class="field">
-          <div class="row"><label for="i_cost">Avg cost per server ($)</label></div>
-          <span class="hint">Fully loaded: hardware + licenses + support</span>
-          <cds-number-input id="i_cost" data-key="cost" value="35000" min="1" step="1000"
-            label="" hide-label="true" size="lg"></cds-number-input>
+        <div class="field" data-field="util">
+          <div class="row"><div class="lab"><label>Current memory utilization</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="util">Our estimate</span></div><span class="val"><input class="val-in" id="v_util" data-vkey="util" type="number" min="30" max="100" step="1" value="75" inputmode="numeric" aria-label="Current memory utilization percent">%</span></div>
+          <span class="hint">Memory in use ÷ memory installed, as vCenter reports it</span>
+          <div class="infobox">How full the hosts are today. <b>Default:</b> 75%. <b>Used for:</b> memory in use (installed × this), and therefore how many months until you hit the safe ceiling. Months to exhaustion depends only on this, the safe ceiling, and growth.</div>
+          <cds-slider data-key="util" min="30" max="100" step="1" value="75" label-text="" hide-label="true" hide-text-input="true"><cds-slider-input aria-label="util" type="number"></cds-slider-input></cds-slider>
         </div>
 
-        <div class="field">
-          <div class="row"><label>Turbonomic memory reclaim</label><span class="val"><input class="val-in" id="v_rho" data-vkey="rho" type="number" min="0" max="50" step="1" value="20" inputmode="numeric" aria-label="Turbonomic memory reclaim percent">%</span></div>
-          <span class="hint">Right-sizing reclaim — conservative range 15–30%</span>
-          <cds-slider data-key="rho" min="0" max="50" step="1" value="20" label-text="" hide-label="true" hide-text-input="true">
-            <cds-slider-input aria-label="Turbonomic memory reclaim percent"></cds-slider-input>
-          </cds-slider>
+        <div class="field" data-field="growth">
+          <div class="row"><div class="lab"><label>Annual growth</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="growth">Our estimate</span></div><span class="val"><input class="val-in" id="v_growth" data-vkey="growth" type="number" min="0" max="40" step="1" value="10" inputmode="numeric" aria-label="Annual growth percent">%</span></div>
+          <span class="hint">Growth in memory demand per year, compounding</span>
+          <div class="infobox">How much faster memory demand gets each year. It compounds, so 10% a year is 61% after five years. <b>Default:</b> 10%, a common planning figure. <b>Used for:</b> when each scenario has to buy hosts, and the VM count Turbonomic is priced on each year.</div>
+          <cds-slider data-key="growth" min="0" max="40" step="1" value="10" label-text="" hide-label="true" hide-text-input="true"><cds-slider-input aria-label="growth" type="number"></cds-slider-input></cds-slider>
         </div>
 
-        <div class="field seller-field">
-          <div class="row"><label for="i_dens">Turbo-optimized VM density (VMs/host)</label></div>
-          <span class="hint">Seller input: target density after Turbonomic placement optimization</span>
-          <cds-number-input id="i_dens" data-key="density" value="30" min="1" step="1"
-            label="" hide-label="true" size="lg"></cds-number-input>
-          <span class="hint" id="densNote"></span>
+        <div class="field" data-field="cost">
+          <div class="row"><div class="lab"><label for="i_cost">Cost per new host ($)</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="cost">Our estimate</span></div></div>
+          <span class="hint">Today's price, fully loaded. Held flat for 5 years, no price increases assumed.</span>
+          <div class="infobox">What one new host costs today, including hardware, support and OS. <b>Default:</b> $35,000. The model keeps this price the same for all five years, which is conservative while memory prices are rising. <b>Used for:</b> every host either scenario buys.</div>
+          <cds-number-input id="i_cost" data-key="cost" value="35000" min="1" step="1000" label="" hide-label="true"></cds-number-input>
         </div>
 
-        <div class="field">
-          <div class="row"><label for="i_decom">Decommission freed hosts</label></div>
-          <span class="hint">On: shed hosts for license savings. Off: keep them powered as headroom for maximum runway and deferred purchases.</span>
-          <cds-toggle id="i_decom" label-text="" labelA="Keep as headroom" labelB="Decommission"></cds-toggle>
+        <div class="field" data-field="turbovm">
+          <div class="row"><div class="lab"><label for="i_turbovm">Turbonomic price per VM per year ($)</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="turbovm">Our estimate</span></div></div>
+          <span class="hint">List $268.80 · IDIQ $241.92. Enter your deal price, or apply a discount below.</span>
+          <div class="infobox">The subscription price per VM per year. <b>Default:</b> $241.92 (IDIQ). <b>Used for:</b> the Turbonomic cost in every dollar figure on this page, every year, on that year's VM count. There is no number on the page that ignores it.</div>
+          <cds-number-input id="i_turbovm" data-key="turbovm" value="241.92" min="0" step="10" label="" hide-label="true"></cds-number-input>
+          <div class="row" style="margin-top:12px"><div class="lab"><label>Discount</label></div><span class="val"><input class="val-in" id="v_disc" data-vkey="disc" type="number" min="0" max="90" step="5" value="0" inputmode="numeric" aria-label="Discount percent">%</span></div>
+          <cds-slider data-key="disc" min="0" max="90" step="5" value="0" label-text="" hide-label="true" hide-text-input="true"><cds-slider-input aria-label="disc" type="number"></cds-slider-input></cds-slider>
+          <div class="pricenote" id="priceNote">—</div>
         </div>
 
-        <!-- Advanced -->
+        <div class="field" data-field="rho">
+          <div class="row"><div class="lab"><label>Turbonomic memory reclaim</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="rho">Our estimate</span></div><span class="val"><input class="val-in" id="v_rho" data-vkey="rho" type="number" min="0" max="50" step="1" value="20" inputmode="numeric" aria-label="Turbonomic memory reclaim percent">%</span></div>
+          <span class="hint">Memory given back by right-sizing oversized VMs. 15–30% is typical.</span>
+          <div class="infobox">Turbonomic finds VMs that were given more memory than they use and resizes them. This is the share of memory that comes back. <b>Default:</b> 20%, the conservative end. <b>Used for:</b> how far the next purchase moves out, and how many VMs then fit on a host.</div>
+          <cds-slider data-key="rho" min="0" max="50" step="1" value="20" label-text="" hide-label="true" hide-text-input="true"><cds-slider-input aria-label="rho" type="number"></cds-slider-input></cds-slider>
+        </div>
+
         <cds-accordion class="adv">
-          <cds-accordion-item title="Advanced assumptions (13 more inputs)">
+          <cds-accordion-item title="Advanced assumptions (10 more inputs)">
             <div class="adv-body">
-              <div class="field">
-                <div class="row"><label>Max safe utilization</label><span class="val"><input class="val-in" id="v_safe" data-vkey="safe" type="number" min="60" max="95" step="1" value="85" inputmode="numeric" aria-label="Max safe utilization percent">%</span></div>
-                <span class="hint">Threshold before performance risk (incl. HA/N+1 reserve)</span>
-                <cds-slider data-key="safe" min="60" max="95" step="1" value="85" label-text="" hide-label="true" hide-text-input="true">
-                  <cds-slider-input aria-label="Max safe utilization percent"></cds-slider-input>
-                </cds-slider>
+
+              <div class="field" data-field="safe">
+                <div class="row"><div class="lab"><label>Safe ceiling (max utilization)</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="safe">Our estimate</span></div><span class="val"><input class="val-in" id="v_safe" data-vkey="safe" type="number" min="60" max="95" step="1" value="85" inputmode="numeric" aria-label="Safe ceiling percent">%</span></div>
+                <span class="hint">Point where you must add capacity, including HA / N+1 reserve</span>
+                <div class="infobox">Memory utilization you won't go past before adding hosts. Leaves room for failover. <b>Default:</b> 85%. <b>Used for:</b> months to exhaustion, and when each scenario buys hosts. Both scenarios use the same ceiling, so it doesn't favor Turbonomic.</div>
+                <cds-slider data-key="safe" min="60" max="95" step="1" value="85" label-text="" hide-label="true" hide-text-input="true"><cds-slider-input aria-label="safe" type="number"></cds-slider-input></cds-slider>
               </div>
-              <div class="field">
-                <div class="row"><label for="i_mps">Memory per server (GB)</label></div>
-                <span class="hint">Physical RAM per host (Simer benchmark: dual 20-core, 512 GB)</span>
-                <cds-number-input id="i_mps" data-key="mps" value="512" min="1" step="64" label="" hide-label="true"></cds-number-input>
+
+              <div class="field" data-field="tutil">
+                <div class="row"><div class="lab"><label>Target utilization after consolidation</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="tutil">Our estimate</span></div><span class="val"><input class="val-in" id="v_tutil" data-vkey="tutil" type="number" min="40" max="90" step="1" value="70" inputmode="numeric" aria-label="Target utilization percent">%</span></div>
+                <span class="hint">How full you'd run hosts once Turbonomic packs VMs onto fewer of them</span>
+                <div class="infobox">After reclaim, Turbonomic can place VMs onto fewer hosts. This is how full you'd let those hosts get. Lower is more conservative. <b>Default:</b> 70%, below the safe ceiling so there is still headroom. <b>Used for:</b> the Turbonomic-optimized density and the number of hosts you can free today.</div>
+                <cds-slider data-key="tutil" min="40" max="90" step="1" value="70" label-text="" hide-label="true" hide-text-input="true"><cds-slider-input aria-label="tutil" type="number"></cds-slider-input></cds-slider>
               </div>
-              <div class="field">
-                <div class="row"><label for="i_lead">Hardware lead time (months)</label></div>
+
+              <div class="field" data-field="active">
+                <div class="row"><div class="lab"><label>Share of assigned memory in use</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="active">Our estimate</span></div><span class="val"><input class="val-in" id="v_active" data-vkey="active" type="number" min="30" max="100" step="1" value="75" inputmode="numeric" aria-label="Share of assigned memory in use percent">%</span></div>
+                <span class="hint">Only used to estimate host count when Hosts is on Auto</span>
+                <div class="infobox">VMs typically use well under the memory they're assigned. <b>Default:</b> 75%. <b>Used for:</b> nothing except the Auto host estimate: assigned memory × this share, divided by utilization, gives installed memory, and that gives hosts.</div>
+                <cds-slider data-key="active" min="30" max="100" step="1" value="75" label-text="" hide-label="true" hide-text-input="true"><cds-slider-input aria-label="active" type="number"></cds-slider-input></cds-slider>
+              </div>
+
+              <div class="field" data-field="lead">
+                <div class="row"><div class="lab"><label for="i_lead">Hardware lead time (months)</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="lead">Our estimate</span></div></div>
+                <div class="infobox">Time from placing an order to hosts being racked and usable. <b>Default:</b> 6 months. <b>Used for:</b> the order-by date only (months to exhaustion minus lead time).</div>
                 <cds-number-input id="i_lead" data-key="lead" value="6" min="0" step="1" label="" hide-label="true"></cds-number-input>
               </div>
-              <div class="field">
-                <div class="row"><label for="i_cycle">Hardware purchase cycle (years)</label></div>
-                <cds-number-input id="i_cycle" data-key="cycle" value="4" min="1" step="1" label="" hide-label="true"></cds-number-input>
-              </div>
-              <div class="field">
-                <div class="row"><label>Unplanned buy that displaces planned refresh</label><span class="val"><input class="val-in" id="v_disp" data-vkey="disp" type="number" min="0" max="100" step="5" value="40" inputmode="numeric" aria-label="Percent of unplanned purchase that displaces planned refresh">%</span></div>
-                <cds-slider data-key="disp" min="0" max="100" step="5" value="40" label-text="" hide-label="true" hide-text-input="true">
-                  <cds-slider-input aria-label="Percent of unplanned purchase that displaces planned refresh"></cds-slider-input>
-                </cds-slider>
-              </div>
-              <div class="field">
-                <div class="row"><label for="i_defcap">Refresh deferral cap (months)</label></div>
-                <span class="hint">Conservative cap on the model-derived deferral</span>
-                <cds-number-input id="i_defcap" data-key="defcap" value="18" min="0" step="1" label="" hide-label="true"></cds-number-input>
-              </div>
-              <div class="field">
-                <div class="row"><label for="i_win">Purchase coverage window (months)</label></div>
-                <span class="hint">Growth one unplanned purchase must cover</span>
-                <cds-number-input id="i_win" data-key="win" value="12" min="3" step="1" label="" hide-label="true"></cds-number-input>
-              </div>
-              <div class="field">
-                <div class="row"><label>Cost of capital</label><span class="val"><input class="val-in" id="v_wacc" data-vkey="wacc" type="number" min="0" max="20" step="1" value="8" inputmode="numeric" aria-label="Cost of capital percent">%</span></div>
-                <span class="hint">Used only to value deferral (NPV)</span>
-                <cds-slider data-key="wacc" min="0" max="20" step="1" value="8" label-text="" hide-label="true" hide-text-input="true">
-                  <cds-slider-input aria-label="Cost of capital percent"></cds-slider-input>
-                </cds-slider>
+
+              <div class="field" data-field="densOv">
+                <div class="row"><div class="lab"><label for="i_densOv">Density override (VMs per host)</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="densOv">Our estimate</span></div></div>
+                <span class="hint">Leave at 0 to let the calculator work it out. Never goes below today's density.</span>
+                <div class="infobox">Normally the calculator computes the Turbonomic-optimized density from reclaim and target utilization. Type a number here to force a specific VMs-per-host instead, for example from a placement study. It is ignored if it is lower than the density you already run. <b>Default:</b> 0 (off).</div>
+                <cds-number-input id="i_densOv" data-key="densOv" value="0" min="0" step="1" label="" hide-label="true"></cds-number-input>
               </div>
 
-              <div class="adv-sub">Hypervisor licensing &amp; Turbonomic pricing</div>
-              <div class="field">
-                <div class="row"><label for="i_cpus">CPUs per server</label></div>
-                <cds-number-input id="i_cpus" data-key="cpus" value="2" min="1" step="1" label="" hide-label="true"></cds-number-input>
-              </div>
-              <div class="field">
-                <div class="row"><label for="i_corespc">Cores per CPU</label></div>
-                <span class="hint" id="coreNote"></span>
-                <cds-number-input id="i_corespc" data-key="corespc" value="20" min="1" step="2" label="" hide-label="true"></cds-number-input>
-              </div>
-              <div class="field">
-                <div class="row"><label for="i_vmwlic">VMware license per host ($/yr)</label></div>
+              <div class="adv-sub">Licensing</div>
+
+              <div class="field" data-field="vmwlic">
+                <div class="row"><div class="lab"><label for="i_vmwlic">VMware license per host ($/yr)</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="vmwlic">Our estimate</span></div></div>
                 <span class="hint">vSphere Foundation / Enterprise Plus per host (Simer: $8,500)</span>
+                <div class="infobox">Annual hypervisor license per host. <b>Default:</b> $8,500. <b>Used for:</b> both scenarios pay this on every host they run. Savings come from hosts Turbonomic lets you stop licensing.</div>
                 <cds-number-input id="i_vmwlic" data-key="vmwlic" value="8500" min="0" step="250" label="" hide-label="true"></cds-number-input>
               </div>
-              <div class="field">
-                <div class="row"><label for="i_vmwmaint">VMware maintenance per host ($/yr)</label></div>
-                <span class="hint">Support &amp; maintenance, ~20% of license (Simer: $1,750)</span>
+
+              <div class="field" data-field="vmwmaint">
+                <div class="row"><div class="lab"><label for="i_vmwmaint">VMware support per host ($/yr)</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="vmwmaint">Our estimate</span></div></div>
+                <span class="hint">Support &amp; maintenance, about 20% of license (Simer: $1,750)</span>
+                <div class="infobox">Annual support on top of the license. <b>Default:</b> $1,750. <b>Used for:</b> the same way as the license.</div>
                 <cds-number-input id="i_vmwmaint" data-key="vmwmaint" value="1750" min="0" step="250" label="" hide-label="true"></cds-number-input>
               </div>
-              <div class="field">
-                <div class="row"><label for="i_turbovm">Turbonomic cost per VM ($/yr)</label></div>
-                <span class="hint">List $268.80; IDIQ discounted $241.92. Volume tiers apply at 10k+/100k+ VMs.</span>
-                <cds-number-input id="i_turbovm" data-key="turbovm" value="241.92" min="0" step="10" label="" hide-label="true"></cds-number-input>
+
+              <div class="field" data-field="cpus">
+                <div class="row"><div class="lab"><label for="i_cpus">CPUs per host</label><button class="info" type="button" aria-label="About this field">i</button></div></div>
+                <div class="infobox">Reference only. Multiplied by cores per CPU to show what per-core VMware pricing would cost per host. Does not change any result.</div>
+                <cds-number-input id="i_cpus" data-key="cpus" value="2" min="1" step="1" label="" hide-label="true"></cds-number-input>
               </div>
+
+              <div class="field" data-field="corespc">
+                <div class="row"><div class="lab"><label for="i_corespc">Cores per CPU</label><button class="info" type="button" aria-label="About this field">i</button></div></div>
+                <span class="hint" id="coreNote"></span>
+                <div class="infobox">Reference only. See CPUs per host.</div>
+                <cds-number-input id="i_corespc" data-key="corespc" value="20" min="1" step="2" label="" hide-label="true"></cds-number-input>
+              </div>
+
             </div>
           </cds-accordion-item>
         </cds-accordion>
@@ -507,16 +477,14 @@
     <section class="panel results" aria-label="Your results">
       <div class="panel-h">
         <div class="eyebrow">Step 2</div>
-        <h2>Your memory risk &amp; savings</h2>
-        <p>Modeled from your inputs using a compounding capacity projection.</p>
+        <h2>With vs. without Turbonomic</h2>
+        <p>Five-year cost of running your estate, modeled from your inputs. Every dollar figure includes the Turbonomic subscription.</p>
       </div>
 
-      <!-- cinematic loader -->
       <div class="loader" id="loader" aria-live="polite">
         <div class="ring">
           <svg width="96" height="96" viewBox="0 0 96 96">
-            <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#0f62fe"/><stop offset="1" stop-color="#8a3ffc"/></linearGradient></defs>
+            <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0f62fe"/><stop offset="1" stop-color="#8a3ffc"/></linearGradient></defs>
             <circle class="rt" cx="48" cy="48" r="42"/>
             <circle class="rp" id="loadRing" cx="48" cy="48" r="42"/>
           </svg>
@@ -530,139 +498,79 @@
       </div>
 
       <div class="res-body" id="resbody">
+        <div class="restored" id="restored">Restored the inputs from your last visit. <a id="restoredReset">Start from defaults</a></div>
         <div class="databanner" id="dataBanner">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="#8e6a00"><path d="M8 1L1 14h14L8 1zm0 3l4.7 8.7H3.3L8 4zm-.75 3v3h1.5V7h-1.5zm0 4v1.5h1.5V11h-1.5z"/></svg>
           <span id="dataBannerTxt"></span>
         </div>
 
-        <!-- Headline gauge -->
-        <div class="headline reveal" id="rv_head">
-          <div class="gauge">
-            <svg width="196" height="196" viewBox="0 0 196 196">
-              <circle class="track" cx="98" cy="98" r="84"/>
-              <circle class="prog" id="gaugeArc" cx="98" cy="98" r="84"/>
-            </svg>
-            <div class="center"><div class="num" id="g_num">—</div><div class="unit" id="g_unit">months to exhaustion</div></div>
-          </div>
-          <div class="hl-copy">
-            <span class="status st-good" id="statusPill">On track</span>
-            <h3 id="hl_head">—</h3>
-            <p class="sub" id="hl_sub">—</p>
+        <!-- Headline: net savings at 1 / 3 / 5 years -->
+        <div class="hl reveal" id="rv_head">
+          <span class="status st-good" id="statusPill">—</span>
+          <h3 id="hl_head">—</h3>
+          <p class="sub" id="hl_sub">—</p>
+          <div class="tiles">
+            <div class="tile"><div class="k">1-year net savings</div><div class="v" id="t_n1">$0</div><div class="d">after Turbonomic cost</div></div>
+            <div class="tile"><div class="k">3-year net savings</div><div class="v" id="t_n3">$0</div><div class="d">after Turbonomic cost</div></div>
+            <div class="tile hero5"><div class="k">5-year net savings</div><div class="v" id="t_n5">$0</div><div class="d" id="t_n5_d">after Turbonomic cost</div></div>
           </div>
         </div>
 
-        <!-- Metric tiles -->
-        <div class="tiles reveal" id="rv_tiles">
-          <div class="tile">
-            <div class="k">Unplanned CapEx exposure</div>
-            <div class="v" id="t_expo">$0</div>
-            <div class="d" id="t_expo_d">first forced purchase</div>
-          </div>
-          <div class="tile accent">
-            <div class="k">Total Turbonomic value</div>
-            <div class="v" id="t_val">$0</div>
-            <div class="d" id="t_val_d">avoided + deferred</div>
-          </div>
-          <div class="tile">
-            <div class="k">Runway extension</div>
-            <div class="v up" id="t_run">0</div>
-            <div class="d" id="t_run_d">additional months</div>
-          </div>
+        <!-- Side by side -->
+        <div class="block reveal" id="rv_cmp">
+          <h4>Before and after, over 5 years</h4>
+          <p class="cap">Same estate, same growth, same safe ceiling. The only difference is Turbonomic.</p>
+          <div class="cmpwrap"><table class="cmp" id="cmpTable"></table></div>
+          <div class="netline" id="netline"><span class="l">Difference in total 5-year cost</span><span class="v" id="netlineV">$0</span></div>
         </div>
 
-        <!-- Value split -->
-        <div class="block reveal" id="rv_split">
-          <h4>How the Turbonomic value breaks down</h4>
-          <p class="cap">Every dollar of exposure lands in exactly one bucket — no double counting.</p>
-          <div class="splitbar">
-            <span class="seg-elim" id="sg_elim" style="width:0"></span>
-            <span class="seg-rep" id="sg_rep" style="width:0"></span>
-            <span class="seg-def" id="sg_def" style="width:0"></span>
-          </div>
-          <div class="legend">
-            <div class="li"><span class="sw seg-elim"></span>Purchases eliminated&nbsp;<b id="lg_elim">$0</b></div>
-            <div class="li"><span class="sw seg-rep"></span>Re-planned into refresh&nbsp;<b id="lg_rep">$0</b></div>
-            <div class="li"><span class="sw seg-def"></span>Deferral value (NPV)&nbsp;<b id="lg_def">$0</b></div>
-          </div>
-        </div>
-
-        <!-- Before / after -->
-        <div class="block reveal" id="rv_ba">
-          <h4>36-month cumulative exposure</h4>
-          <p class="cap">Capacity shortfall you would have to buy your way out of over three years.</p>
-          <div class="ba">
-            <div class="col">
-              <div class="t">Without Turbonomic</div>
-              <div class="m" id="ba_wo">$0</div>
-              <div class="bar bar-risk"><i id="ba_wo_bar" style="width:0"></i></div>
-            </div>
-            <div class="col">
-              <div class="t">With Turbonomic</div>
-              <div class="m" id="ba_w" style="color:var(--cds-green-60)">$0</div>
-              <div class="bar bar-good"><i id="ba_w_bar" style="width:0"></i></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Hosts & density (Kevin) -->
+        <!-- Density -->
         <div class="block reveal" id="rv_dens">
-          <h4>Hosts &amp; density (placement optimization)</h4>
+          <h4>Density and hosts</h4>
           <p class="cap" id="densCap">—</p>
           <div class="tiles t4">
-            <div class="tile">
-              <div class="k">Current density</div>
-              <div class="v" id="d2_now">—</div>
-              <div class="d" id="d2_now_d">VMs/host</div>
-            </div>
-            <div class="tile">
-              <div class="k">With Turbonomic</div>
-              <div class="v up" id="d2_used">—</div>
-              <div class="d" id="d2_used_d">VMs/host</div>
-            </div>
-            <div class="tile accent">
-              <div class="k">Hosts freed</div>
-              <div class="v" id="d2_freed">—</div>
-              <div class="d" id="d2_freed_d">—</div>
-            </div>
-            <div class="tile">
-              <div class="k">Post-Turbo exhaustion</div>
-              <div class="v" id="d2_run">—</div>
-              <div class="d" id="d2_run_d">—</div>
-            </div>
+            <div class="tile"><div class="k">Density today</div><div class="v" id="d2_now">—</div><div class="d" id="d2_now_d">VMs per host</div></div>
+            <div class="tile"><div class="k">Density with Turbonomic</div><div class="v up" id="d2_with">—</div><div class="d" id="d2_with_d">VMs per host</div></div>
+            <div class="tile"><div class="k">Hosts you can free today</div><div class="v up" id="d2_freed">—</div><div class="d" id="d2_freed_d">—</div></div>
+            <div class="tile"><div class="k">Memory reclaimed</div><div class="v up" id="d2_rec">—</div><div class="d" id="d2_rec_d">—</div></div>
           </div>
         </div>
 
-        <!-- 5-year projection (Kevin) -->
+        <!-- Year by year -->
         <div class="block reveal" id="rv_proj">
-          <h4>3&ndash;5 year projection: with vs. without Turbonomic</h4>
-          <p class="cap">Cost curves compared honestly: hosts are bought only when growth exceeds the fleet you own, and savings emerge from the difference. No asset-value booking.</p>
+          <h4>Year by year</h4>
+          <p class="cap">Hosts are bought only when memory in use passes the safe ceiling of the hosts you own. Freed hosts are put back to work before anything new is bought.</p>
           <div class="projwrap"><table class="proj" id="projTable"></table></div>
         </div>
 
-        <!-- Detailed analysis -->
+        <!-- Runway detail -->
         <div class="block reveal" id="rv_detail">
-          <h4>Detailed analysis</h4>
+          <h4>Memory runway</h4>
+          <p class="cap" id="runCap">—</p>
           <div class="detail">
             <div class="dcol">
-              <div class="t">Current state</div>
-              <div class="drow"><span>Consumed memory demand</span><b id="d_demand">—</b></div>
-              <div class="drow"><span>Configured vRAM</span><b id="d_vram">—</b></div>
-              <div class="drow"><span>Safe capacity</span><b id="d_cap">—</b></div>
-              <div class="drow"><span>Remaining safe headroom</span><b id="d_head">—</b></div>
-              <div class="drow"><span>Growth, next 12 months</span><b id="d_grow">—</b></div>
+              <div class="t">Today, without Turbonomic</div>
+              <div class="drow"><span>Memory installed</span><b id="d_inst">—</b></div>
+              <div class="drow"><span>Memory assigned to VMs</span><b id="d_vram">—</b></div>
+              <div class="drow"><span>Memory in use</span><b id="d_demand">—</b></div>
+              <div class="drow"><span>Safe ceiling</span><b id="d_cap">—</b></div>
+              <div class="drow"><span>Headroom left</span><b id="d_head">—</b></div>
+              <div class="drow"><span>Months until ceiling</span><b id="d_t0">—</b></div>
+              <div class="drow"><span>Order-by deadline</span><b id="d_order">—</b></div>
             </div>
             <div class="dcol">
-              <div class="t">Purchase &amp; Turbonomic impact</div>
-              <div class="drow"><span>Unplanned buy size</span><b id="d_buy">—</b></div>
-              <div class="drow"><span>Order-by deadline</span><b id="d_order">—</b></div>
-              <div class="drow"><span>Reclaimed capacity</span><b id="d_reclaim">—</b></div>
-              <div class="drow"><span>Post-reclaim utilization</span><b id="d_util1">—</b></div>
-              <div class="drow"><span>Achieved refresh deferral</span><b id="d_defer">—</b></div>
+              <div class="t">With Turbonomic</div>
+              <div class="drow"><span>Memory reclaimed</span><b id="d_reclaim">—</b></div>
+              <div class="drow"><span>Memory in use after reclaim</span><b id="d_d1">—</b></div>
+              <div class="drow"><span>Utilization after reclaim</span><b id="d_util1">—</b></div>
+              <div class="drow"><span>Months until ceiling</span><b id="d_t1">—</b></div>
+              <div class="drow"><span>Extra runway</span><b id="d_extra">—</b></div>
+              <div class="drow"><span>Hosts needed at target utilization</span><b id="d_hw0">—</b></div>
+              <div class="drow"><span>Turbonomic cost per year, today</span><b id="d_tcost">—</b></div>
             </div>
           </div>
         </div>
 
-        <!-- Executive message -->
         <div class="exec reveal" id="rv_exec"><p id="execMsg">—</p></div>
 
         <div class="reveal" id="rv_cta" style="margin-top:22px;display:flex;gap:12px;flex-wrap:wrap">
@@ -674,6 +582,8 @@
         <div class="export-row reveal" id="rv_export">
           <cds-button id="pdfBtn" kind="ghost" size="sm">Download report (PDF)</cds-button>
           <cds-button id="csvBtn" kind="ghost" size="sm">Download data (CSV)</cds-button>
+          <cds-button id="shareBtn" kind="ghost" size="sm">Copy share link</cds-button>
+          <span class="copied" id="copied">Link copied</span>
         </div>
 
         <div class="foot" id="foot"></div>
@@ -692,142 +602,102 @@
 
 <div class="disclaimer">
   <span class="brandline"><b>IBM Turbonomic</b> — Application Resource Management. </span>
-  This calculator provides directional estimates for planning discussion only, based on the values you enter and a compounding capacity model. It is not a commitment of results, pricing, or savings. Dollar figures are expressed at the time of the modeled purchase; “deferral value” is the net present value of postponing that outflow. Reclaim is bounded by the lesser of configured vRAM and consumed memory. Actual outcomes depend on workload behavior, environment, and configuration.
+  This calculator provides directional estimates for planning discussion only, based on the values you enter and a compounding capacity model. It is not a commitment of results, pricing, or savings. It counts only on-premises server and hypervisor costs; it does not include cloud, performance, labor or outage benefits. Host prices are held flat. Reclaim is bounded by the lesser of assigned and in-use memory. Actual outcomes depend on workload behavior, environment, and configuration.
 </div>
 
 <script>
 /* ============================================================
-   FORMULA MODEL — 1:1 port of the verified v2 spreadsheet.
-   Cell references map to Turbo - Memory_Shortage_Calculator_v2.xlsx.
+   v4 FORMULA MODEL — one 5-year cost curve, with vs. without.
+   The memory-runway math (t = 12·ln(K/D)/ln(1+r)) is unchanged
+   from the verified v2 spreadsheet.
    ============================================================ */
+function autoHosts(x){
+  const M=Math.max(1,x.mps), u=Math.max(0.01,x.util/100), a=Math.max(0.01,x.active/100);
+  return Math.max(1, Math.ceil(Math.max(1,x.vms)*Math.max(0.0001,x.gb)*a/(u*M)));
+}
 function calcModel(x){
-  const MCAP = 240, ln = Math.log, pow = Math.pow;
-  const round6 = v => Math.round(v*1e6)/1e6;
-  const ceil6  = v => Math.ceil(round6(v));
+  const MCAP=240, ln=Math.log, pow=Math.pow;
+  const r6=v=>Math.round(v*1e6)/1e6, ceil6=v=>Math.ceil(r6(v));
+  const N=Math.max(1,x.vms), g=Math.max(0.0001,x.gb);
+  const r=Math.max(-0.5,Math.min(1,x.growth/100));
+  const u=Math.min(1,Math.max(0.0001,x.util/100));
+  const s=x.safe/100, tu=Math.min(s,Math.max(0.05,x.tutil/100));
+  const M=Math.max(1,x.mps);
+  const H=x.hostsAuto?autoHosts(x):Math.max(1,Math.round(x.hosts));
+  const C=Math.max(0,x.cost), TL=Math.max(0,x.lead);
+  const rho=Math.max(0,Math.min(0.9,x.rho/100));
+  const disc=Math.max(0,Math.min(100,x.disc||0));
+  const price=Math.max(0,x.turbovm)*(1-disc/100);
+  const licHost=Math.max(0,x.vmwlic)+Math.max(0,x.vmwmaint);
+  const dOv=Math.max(0,x.densOv||0);
+  const coresHost=Math.max(1,x.cpus)*Math.max(1,x.corespc);
 
-  // --- inputs (UI units -> model units) ---
-  const N0 = Math.max(1, x.vms);          // B4
-  const g  = Math.max(0.0001, x.gb);      // B5
-  const r  = Math.max(-0.5, Math.min(1, x.growth/100)); // B21 (clamped)
-  const u  = Math.min(1, Math.max(0.0001, x.util/100)); // B7
-  const I  = Math.max(0.0001, x.inst);    // B8
-  const s  = x.safe/100;                  // B9
-  const C  = Math.max(0, x.cost);         // B10
-  const M  = Math.max(1, x.mps);          // B11
-  const L  = Math.max(1, x.cycle);        // B12
-  const TL = Math.max(0, x.lead);         // B13
-  const f  = x.disp/100;                  // B14
-  const rho= x.rho/100;                   // B15
-  const Dcap = Math.max(0, x.defcap);     // B16
-  const W  = Math.max(3, x.win);          // B17
-  const w  = x.wacc/100;                  // B19
+  // --- today ---
+  const I=H*M/1024, D0=u*I, V0=N*g/1024, K=s*I, headroom=K-D0;
+  const conflict=D0>V0*1.02;                 // VMs using more than they are assigned: inputs disagree
+  const mVM=D0*1024/N;
+  const runway=(D,Kc)=> D>=Kc?0:(r<=0?MCAP:Math.min(MCAP,12*ln(Kc/D)/ln(1+r)));
+  const t0=runway(D0,K);
+  const STATUS=D0>=K?1:(r<=0?2:(t0>=MCAP?4:(t0<=TL?3:0)));
+  const orderBy=Math.max(0,t0-TL);
 
-  // --- stocks ---
-  const V0 = N0*g/1024;                   // B23 configured vRAM (TB)
-  const D0 = u*I;                         // B24 consumed demand (TB) — exhaustion driver
-  const K  = s*I;                         // B25 safe capacity (TB)
-  const headroom = K - D0;                // B26
-  const mImpl = D0*1024/N0;               // B27 implied consumed GB/VM
-  const Usrv = M*s/1024;                  // B30 usable TB per new server
+  // --- Turbonomic: reclaim shrinks what each VM uses ---
+  const RecBase=Math.min(V0,D0), Rtb=rho*RecBase, D1=Math.max(D0-Rtb,0.01*D0), mVM1=D1*1024/N;
+  const u1=D1/I;
+  const t1=runway(D1,K);                     // hardware kept, so the ceiling is unchanged
+  const STATUSW=D1>=K?1:(r<=0?2:(t1>=MCAP?4:0));
 
-  // --- timeline (compounding) ---
-  const t0 = D0>=K ? 0 : (r<=0 ? MCAP : Math.min(MCAP, 12*ln(K/D0)/ln(1+r))); // B31
-  const orderBy = Math.max(0, t0-TL);     // B32
-  const STATUS = D0>=K ? 1 : (r<=0 ? 2 : (t0>=MCAP ? 4 : (t0<=TL ? 3 : 0))); // B33
+  // --- consolidation at the target utilization (never below today's density) ---
+  const densNow=N/H;
+  const densMax=M*s/Math.max(0.0001,mVM1);          // most VMs a host can physically hold at the safe ceiling
+  const dOvUsed=dOv>0?Math.min(dOv,densMax):0, dOvClamped=dOv>0&&dOv>densMax+1e-9;
+  let hostsW0=dOvUsed>0?ceil6(N/dOvUsed):ceil6(D1*1024/(M*tu));
+  hostsW0=Math.min(H,Math.max(1,hostsW0));
+  const densWith=N/hostsW0, hostsFreed=H-hostsW0;
 
-  // --- unplanned purchase, tied to the timeline ---
-  const Dx = Math.max(D0, K);             // B34
-  const buySize = Math.max(0, Dx*pow(1+r, W/12)-K, D0-K);        // B35
-  const servers = (t0>=MCAP || Usrv<=0) ? 0 : ceil6(buySize/Usrv); // B36
-  const E = servers*C;                    // B37 exposure
-
-  // --- Turbonomic physics ---
-  const RecBase = Math.min(V0, D0);       // B41
-  const Rtb = rho*RecBase;                // B42 reclaimed capacity
-  const D1 = Math.max(D0-Rtb, 0.01*D0);   // B43 post-reclaim demand
-  const t1 = D1>=K ? 0 : (r<=0 ? MCAP : Math.min(MCAP, 12*ln(K/D1)/ln(1+r))); // B45
-  const dRaw = Math.max(0, t1-t0);        // B46 model-derived deferral
-  const d = Math.min(dRaw, Dcap);         // B47 achieved deferral (capped)
-  const Bfold = Math.min(1, d/(12*L));    // B48
-  const buySize1 = Math.max(0, Math.max(D1,K)*pow(1+r, W/12)-K, D1-K); // B49
-  const servers1 = (t0>=MCAP || Usrv<=0) ? 0 : ceil6(buySize1/Usrv);   // B50 (gate on t0)
-  const E1 = servers1*C;                  // B51
-
-  // --- value partition (no double counting) ---
-  const Eliminated = Math.max(0, E-E1);   // B52
-  const Replanned  = E1*f*Bfold;          // B53
-  const Pdef = E1-Replanned;              // B54 deferred principal
-  const Vdef = Pdef*(1 - pow(1+w, -d/12));// B55 NPV of deferral
-  const Total = Eliminated+Replanned+Vdef;// B56
-  const valPct = E===0 ? 0 : Total/E;     // B57
-  const strictCash = Eliminated+Vdef;     // B59
-
-  // --- 36-month cumulative view (window max) ---
-  const E36  = Usrv<=0 ? 0 : ceil6(Math.max(0, Math.max(D0, D0*pow(1+r,3))-K)/Usrv)*C; // B70
-  const E36T = Usrv<=0 ? 0 : ceil6(Math.max(0, Math.max(D1, D1*pow(1+r,3))-K)/Usrv)*C; // B71
-
-  const dataFlag = D0 > 1.05*V0;          // B29 / B72
-
-  // --- hosts, density & 5-year fleet economics (Kevin / Simer / NZ cost-curve method) ---
-  const dTarget = Math.max(1, x.density);
-  const licHost = Math.max(0, x.vmwlic) + Math.max(0, x.vmwmaint);   // $/host/yr
-  const tvm = Math.max(0, x.turbovm);
-  const decom = !!x.decom;
-  const coresHost = Math.max(1, x.cpus) * Math.max(1, x.corespc);
-  const hostsNow = Math.max(1, Math.ceil(round6(I*1024/M)));
-  const densNow = N0/hostsNow;
-  const mImpl1 = D1*1024/N0;                              // consumed GB/VM after reclaim
-  const densMax = Math.max(1, (M*s)/Math.max(0.0001, mImpl1)); // memory-feasible ceiling
-  const densUsed = Math.min(dTarget, densMax);
-  const densClamped = dTarget > densMax + 1e-9;
-  const hostsWith0 = Math.max(1, Math.ceil(round6(N0/densUsed)));
-  const hostsFreed = Math.max(0, hostsNow - hostsWith0);
-  // post-Turbo runway: keep mode = full capacity (reclaim runway t1); decommission shrinks capacity
-  const IWith = decom ? hostsWith0*M/1024 : I;
-  const KWith = IWith*s;
-  const t0Turbo = D1>=KWith ? 0 : (r<=0 ? MCAP : Math.min(MCAP, 12*ln(KWith/D1)/ln(1+r)));
-  // year-by-year cost curves: buy only when needed > owned; savings = curve difference
-  const proj = [];
-  let peakWo = hostsNow, peakW = decom ? hostsWith0 : hostsNow;
-  let cumCapWo = 0, cumWithAll = 0, cumTurbo = 0, cumNet = 0, cumLicSav = 0;
-  for (let y = 1; y <= 5; y++){
-    const vmsY  = Math.max(0, Math.round(N0*pow(1+r, y)));
-    const needWo = Math.max(1, Math.ceil(round6(vmsY/Math.max(0.0001, densNow))));
-    const needW  = Math.max(1, Math.ceil(round6(vmsY/densUsed)));
-    const buyWo = Math.max(0, needWo-peakWo); peakWo = Math.max(peakWo, needWo);
-    const buyW  = Math.max(0, needW-peakW);   peakW  = Math.max(peakW, needW);
-    const capWo = buyWo*C, capW = buyW*C;
-    const licWo = needWo*licHost;             // without: license the fleet you run
-    const licW  = peakW*licHost;              // with: you own (and license) the kept fleet
-    const tCost = vmsY*tvm;
-    const licSav = licWo-licW;
-    const annualNet = (capWo+licWo) - (capW+licW+tCost);
-    cumCapWo += capWo; cumWithAll += capW+tCost; cumTurbo += tCost;
-    cumNet += annualNet; cumLicSav += licSav;
-    proj.push({y, vms:vmsY, hostsWo:needWo, hostsW:needW, def:Math.max(0,needWo-needW),
-      capWo, capW, licWo, licW, licSav, tCost, annualNet, cumCapWo, cumWithAll, cumNet, cumLicSav});
+  // --- 5-year cost curves ---
+  // Both sides buy a host only when memory in use passes the safe ceiling of the hosts they own.
+  // With Turbonomic: freed hosts leave VMware licensing today and are redeployed before any new buy.
+  const capHost=M*s/1024;
+  const proj=[]; let ownedWo=H, ownedW=H;
+  const cum={capWo:0,capW:0,licWo:0,licW:0,turbo:0,net:0,buyWo:0,buyW:0};
+  for(let y=1;y<=5;y++){
+    const vmsY=Math.round(N*pow(1+r,y));
+    const DyWo=D0*pow(1+r,y), DyW=D1*pow(1+r,y);
+    const needWo=Math.max(1,ceil6(DyWo/capHost)), needW=Math.max(1,ceil6(DyW/capHost));
+    const buyWo=Math.max(0,needWo-ownedWo); ownedWo=Math.max(ownedWo,needWo);
+    const buyW=Math.max(0,needW-ownedW);   ownedW=Math.max(ownedW,needW);
+    const licdWo=ownedWo, licdW=Math.max(hostsW0,needW);           // hosts actually licensed
+    const capWo=buyWo*C, capW=buyW*C, licWo=licdWo*licHost, licW=licdW*licHost, tCost=vmsY*price;
+    const net=(capWo+licWo)-(capW+licW+tCost);
+    cum.capWo+=capWo; cum.capW+=capW; cum.licWo+=licWo; cum.licW+=licW; cum.turbo+=tCost; cum.net+=net; cum.buyWo+=buyWo; cum.buyW+=buyW;
+    proj.push({y,vms:vmsY,DyWo,DyW,ownedWo,ownedW,licdWo,licdW,buyWo,buyW,capWo,capW,licWo,licW,tCost,net,cumNet:cum.net});
   }
-  const y1Net = proj[0].annualNet, net3 = proj[2].cumNet, net5 = proj[4].cumNet;
-  const roi5 = cumTurbo>0 ? (net5+cumTurbo)/cumTurbo : 0;
-
-  return {N0,g,r,u,I,s,C,M,L,TL,f,rho,Dcap,W,w,
-    V0,D0,K,headroom,mImpl,Usrv,t0,orderBy,STATUS,
-    buySize,servers,E,RecBase,Rtb,D1,t1,dRaw,d,Bfold,E1,
-    Eliminated,Replanned,Pdef,Vdef,Total,valPct,strictCash,E36,E36T,dataFlag,
-    dTarget,licHost,tvm,decom,coresHost,hostsNow,densNow,mImpl1,densMax,densUsed,densClamped,
-    hostsWith0,hostsFreed,IWith,KWith,t0Turbo,proj,y1Net,net3,net5,cumTurbo,roi5};
+  const net1=proj[0].cumNet, net3=proj[2].cumNet, net5=proj[4].cumNet;
+  const totWo=cum.capWo+cum.licWo, totW=cum.capW+cum.licW+cum.turbo;
+  const grossSav=totWo-(cum.capW+cum.licW);
+  const roi5=cum.turbo>0?grossSav/cum.turbo:0;
+  const turboYr=N*price;
+  const licSavYr=hostsFreed*licHost;
+  return {N,g,r,u,s,tu,M,H,C,TL,rho,price,disc,licHost,dOv,coresHost,hostsAuto:!!x.hostsAuto,
+    I,D0,V0,K,headroom,conflict,mVM,t0,STATUS,orderBy,RecBase,Rtb,D1,mVM1,u1,t1,STATUSW,
+    densNow,densMax,dOvUsed,dOvClamped,hostsW0,densWith,hostsFreed,capHost,proj,cum,net1,net3,net5,totWo,totW,grossSav,roi5,turboYr,licSavYr};
 }
 
 /* ---------------- formatting ---------------- */
-const fmtUSD = v => (v<0?'-':'')+'$'+Math.abs(Math.round(v)).toLocaleString('en-US');
-const fmtUSDm = v => Math.abs(v)>=1e6 ? (v<0?'-':'')+'$'+Math.abs(v/1e6).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1})+'M' : fmtUSD(v);
-const fmtUSDk = v => v>=1000 ? '$'+Math.round(v/1000).toLocaleString('en-US')+'K' : fmtUSD(v);
+const fmtUSD = v => (v<0?'−':'')+'$'+Math.abs(Math.round(v)).toLocaleString('en-US');
+const fmtUSDm = v => Math.abs(v)>=1e6 ? (v<0?'−':'')+'$'+(Math.abs(v)/1e6).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1})+'M' : fmtUSD(v);
 const fmtNum = v => Math.round(v).toLocaleString('en-US');
 const fmt1 = v => v.toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1});
-function monthsLabel(m,status){
+const fmt2 = v => v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+function monthsText(m,status){
+  if(status===1) return '0 — over the ceiling now';
+  if(status===2||status===4) return '20+ years';
+  return fmt1(m)+' months';
+}
+function monthsShort(m,status){
   if(status===1) return 'now';
   if(status===2||status===4) return '20+ yrs';
-  if(m>=24) return fmt1(m/12)+' yrs';
   return fmt1(m)+' mo';
 }
 function futureDate(months){
@@ -836,197 +706,218 @@ function futureDate(months){
 }
 
 /* ---------------- state ---------------- */
-const DEFAULTS = {vms:25000,gb:16,growth:10,util:75,inst:1200,cost:35000,rho:20,
-  safe:85,mps:512,lead:6,cycle:4,disp:40,defcap:18,win:12,wacc:8,
-  density:30,decom:0,cpus:2,corespc:20,vmwlic:8500,vmwmaint:1750,turbovm:241.92};
+const DEFAULTS = {vms:25000,gb:16,hosts:782,hostsAuto:1,mps:512,util:75,growth:10,cost:35000,turbovm:241.92,disc:0,rho:20,
+  safe:85,tutil:70,active:75,lead:6,densOv:0,vmwlic:8500,vmwmaint:1750,cpus:2,corespc:20};
+const TAGGABLE=['vms','gb','hosts','mps','util','growth','cost','turbovm','rho','safe','tutil','active','lead','densOv','vmwlic','vmwmaint'];
+const STEP1=['vms','gb','hosts','mps','util','growth','cost','turbovm','rho'];
 let state = {...DEFAULTS};
+let src = {}; TAGGABLE.forEach(k=>src[k]='e');
+const STORE='turboCalcV4';
+
+const INPUT_DEFS=[
+  ['Total VMs','vms',''],['Avg memory assigned per VM','gb','GB'],['Number of hosts','hosts','hosts'],['Memory per host','mps','GB'],
+  ['Current memory utilization','util','%'],['Annual growth','growth','%'],['Cost per new host','cost','$'],
+  ['Turbonomic price per VM per year','turbovm','$'],['Discount','disc','%'],['Turbonomic memory reclaim','rho','%'],
+  ['Safe ceiling','safe','%'],['Target utilization after consolidation','tutil','%'],['Share of assigned memory in use','active','%'],
+  ['Hardware lead time','lead','months'],['Density override','densOv','VMs/host'],
+  ['VMware license per host','vmwlic','$/yr'],['VMware support per host','vmwmaint','$/yr'],['CPUs per host','cpus',''],['Cores per CPU','corespc','']
+];
+
+/* ---------------- persistence + share link ---------------- */
+function save(){
+  try{ localStorage.setItem(STORE, JSON.stringify({state,src})); }catch(e){}
+}
+function loadSaved(){
+  try{
+    const raw=localStorage.getItem(STORE); if(!raw) return false;
+    const o=JSON.parse(raw); if(!o||!o.state) return false;
+    for(const k in DEFAULTS){ if(typeof o.state[k]==='number') state[k]=o.state[k]; }
+    if(o.src) TAGGABLE.forEach(k=>{ if(o.src[k]==='c'||o.src[k]==='e') src[k]=o.src[k]; });
+    return true;
+  }catch(e){ return false; }
+}
+function loadURL(){
+  const p=new URLSearchParams(location.search); let any=false;
+  for(const k in DEFAULTS){ if(p.has(k)){ const v=parseFloat(p.get(k)); if(!isNaN(v)){ state[k]=v; any=true; } } }
+  if(p.has('cust')){ p.get('cust').split(',').forEach(k=>{ if(TAGGABLE.includes(k)) src[k]='c'; }); }
+  return any;
+}
+function shareURL(){
+  const p=new URLSearchParams();
+  for(const k in DEFAULTS){ if(state[k]!==DEFAULTS[k]) p.set(k,String(state[k])); }
+  const cust=TAGGABLE.filter(k=>src[k]==='c'); if(cust.length) p.set('cust',cust.join(','));
+  if(document.body.classList.contains('embed')) p.set('embed','1');
+  const q=p.toString();
+  return location.origin+location.pathname+(q?'?'+q:'');
+}
 
 /* ---------------- number count-up ---------------- */
 function animateValue(el, from, to, dur, fmt){
   const start=performance.now();
   function frame(now){
     const p=Math.min(1,(now-start)/dur);
-    const e=1-Math.pow(1-p,3); // easeOutCubic
+    const e=1-Math.pow(1-p,3);
     el.textContent=fmt(from+(to-from)*e);
     if(p<1) requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 }
-
-/* ---------------- gauge ---------------- */
-const GAUGE_R=84, GAUGE_C=2*Math.PI*GAUGE_R;
-function setGauge(months,status){
-  const arc=document.getElementById('gaugeArc');
-  arc.style.strokeDasharray=GAUGE_C;
-  // fraction of ring filled = runway on a 0..36 month scale
-  let frac, color;
-  if(status===1){frac=0.02;color='var(--cds-red-60)';}
-  else if(status===2||status===4){frac=1;color='var(--cds-green-60)';}
-  else{
-    frac=Math.max(0.02,Math.min(1,months/36));
-    color = months<6?'var(--cds-red-60)':(months<18?'var(--cds-yellow-30)':'var(--cds-green-60)');
-  }
-  arc.style.stroke=color;
-  requestAnimationFrame(()=>{ arc.style.strokeDashoffset=GAUGE_C*(1-frac); });
-}
+function signClass(v){ return v<0?'neg':'pos'; }
 
 /* ---------------- render ---------------- */
 function render(o, animate){
-  // data banner
+  // input-side notes
+  const hostsIn=document.getElementById('i_hosts');
+  if(o.hostsAuto){ hostsIn.value=String(o.H); hostsIn.setAttribute('disabled',''); }
+  else hostsIn.removeAttribute('disabled');
+  document.getElementById('hostsHint').textContent = o.hostsAuto
+    ? 'Estimated from your VM count. Turn Auto off to type the real number.'
+    : 'Physical servers running the VMs.';
+  document.getElementById('instHint').textContent = fmtNum(o.H)+' hosts × '+fmtNum(o.M)+' GB = '+fmt1(o.I)+' TB installed · '+fmt1(o.D0)+' TB in use at '+Math.round(o.u*100)+'%';
+  document.getElementById('priceNote').textContent = (o.disc>0?'$'+fmt2(o.price)+' per VM after '+Math.round(o.disc)+'% discount · ':'$'+fmt2(o.price)+' per VM · ')+fmtUSD(o.turboYr)+' per year for '+fmtNum(o.N)+' VMs';
+  const cn=document.getElementById('coreNote');
+  if(cn) cn.textContent = fmtNum(o.coresHost)+' cores per host. Reference: VCF at $350/core-yr ≈ '+fmtUSD(o.coresHost*350)+'/host-yr; vSphere Foundation at $135/core-yr ≈ '+fmtUSD(o.coresHost*135)+'/host-yr.';
+
+  // conflict banner
   const banner=document.getElementById('dataBanner');
-  if(o.dataFlag){
+  if(o.conflict){
     banner.classList.add('show');
     document.getElementById('dataBannerTxt').textContent =
-      'Heads up: your utilization implies ~'+fmt1(o.mImpl)+' GB consumed per VM vs '+fmt1(state.gb)+
-      ' GB configured. We run on the measured utilization and cap reclaim at the smaller base.';
+      'These inputs disagree: '+fmt1(o.D0)+' TB is in use but the VMs are only assigned '+fmt1(o.V0)+' TB in total ('+fmt1(o.mVM)+' GB used per VM vs '+fmt1(o.g)+' GB assigned). Check hosts, memory per host, utilization, or memory per VM. Reclaim is capped at the assigned amount.';
   } else banner.classList.remove('show');
 
   // headline
-  const g_num=document.getElementById('g_num');
   const pill=document.getElementById('statusPill');
-  const head=document.getElementById('hl_head');
-  const sub=document.getElementById('hl_sub');
-  const unit=document.getElementById('g_unit');
-
-  let numText, pillCls, pillTxt, headHTML, subTxt;
-  if(o.STATUS===1){
-    numText='0'; unit.textContent='act now'; pillCls='st-risk'; pillTxt='Over capacity';
-    headHTML='You are <b>already past</b> your safe memory threshold';
-    subTxt='The unplanned purchase is immediate — order now. Turbonomic can shrink or remove it.';
-  }else if(o.STATUS===2||o.STATUS===4){
-    numText='20+'; unit.textContent='years — low risk'; pillCls='st-good'; pillTxt='No near-term risk';
-    headHTML='No memory exhaustion at your current growth';
-    subTxt='There is no near-term unplanned exposure to model. Reclaim still hands back capacity.';
-  }else{
-    numText=fmt1(o.t0); unit.textContent='months to exhaustion';
-    if(o.STATUS===3){pillCls='st-risk';pillTxt='Order window missed';
-      headHTML='Exhaustion in <b>'+fmt1(o.t0)+' months</b> — inside your lead time';
-      subTxt='Even ordering today you would run hot for a while. Reclaim can reopen the window.';
-    }else{
-      pillCls=o.t0<18?'st-warn':'st-good'; pillTxt=o.t0<18?'Action needed':'On track';
-      headHTML='Safe capacity exhausts in <b>'+fmt1(o.t0)+' months</b> (~'+futureDate(o.t0)+')';
-      subTxt='Order-by deadline: '+fmt1(o.orderBy)+' months ('+futureDate(o.orderBy)+'), given your '+fmtNum(o.TL)+'-month lead time.';
-    }
-  }
+  let pillCls, pillTxt, headHTML, subTxt;
+  if(o.STATUS===1){ pillCls='st-risk'; pillTxt='Over capacity now'; }
+  else if(o.STATUS===3){ pillCls='st-risk'; pillTxt='Order window missed'; }
+  else if(o.STATUS===2||o.STATUS===4){ pillCls='st-ok'; pillTxt='No near-term memory risk'; }
+  else { pillCls=o.t0<18?'st-warn':'st-good'; pillTxt=o.t0<18?'Memory pressure in under 18 months':'Memory on track'; }
   pill.className='status '+pillCls; pill.textContent=pillTxt;
-  head.innerHTML=headHTML; sub.textContent=subTxt;
-  setGauge(o.t0,o.STATUS);
-  if(animate && o.STATUS!==1 && o.STATUS!==2 && o.STATUS!==4){
-    animateValue(g_num,0,o.t0,1100,v=>fmt1(v));
-  } else { g_num.textContent=numText; }
+  if(o.net5>=0){
+    headHTML='Turbonomic saves <b>'+fmtUSD(o.net5)+'</b> over 5 years after its own cost';
+  }else{
+    headHTML='On server and VMware costs alone, Turbonomic costs <b>'+fmtUSD(-o.net5)+'</b> more than it saves over 5 years';
+  }
+  subTxt='Without Turbonomic you spend '+fmtUSDm(o.totWo)+' on hosts and VMware over 5 years. With it you spend '+fmtUSDm(o.totW)+', of which '+fmtUSDm(o.cum.turbo)+' is the Turbonomic subscription.';
+  document.getElementById('hl_head').innerHTML=headHTML;
+  document.getElementById('hl_sub').textContent=subTxt;
+  [['t_n1',o.net1],['t_n3',o.net3],['t_n5',o.net5]].forEach(([id,v])=>{
+    const el=document.getElementById(id); el.className='v '+signClass(v);
+    if(animate) animateValue(el,0,v,1100,fmtUSD); else el.textContent=fmtUSD(v);
+  });
+  document.getElementById('t_n5_d').textContent = o.net5>=0
+    ? (o.roi5>0?'$'+fmt2(o.roi5)+' saved per $1 of Turbonomic':'after Turbonomic cost')
+    : 'infrastructure savings cover '+Math.round(o.roi5*100)+'% of Turbonomic cost';
 
-  // tiles
-  const tExpo=document.getElementById('t_expo'), tVal=document.getElementById('t_val'), tRun=document.getElementById('t_run');
-  if(animate){
-    animateValue(tExpo,0,o.E,1000,fmtUSD);
-    animateValue(tVal,0,o.Total,1200,fmtUSD);
-    animateValue(tRun,0,o.d,1000,v=>fmt1(v));
-  }else{ tExpo.textContent=fmtUSD(o.E); tVal.textContent=fmtUSD(o.Total); tRun.textContent=fmt1(o.d); }
-  document.getElementById('t_expo_d').textContent = o.servers>0 ? fmtNum(o.servers)+' servers · '+fmt1(o.buySize)+' TB' : 'no forced purchase';
-  document.getElementById('t_val_d').textContent = (o.valPct*100).toFixed(0)+'% of exposure';
-  document.getElementById('t_run_d').textContent = o.dRaw>o.Dcap ? 'capped at '+fmtNum(o.Dcap)+' mo (derived '+fmt1(o.dRaw)+')' : 'additional runway';
+  // comparison table
+  const td=(v,cls)=>'<td'+(cls?' class="'+cls+'"':'')+'>'+v+'</td>';
+  const row=(l,a,b,cls)=>'<tr'+(cls?' class="'+cls+'"':'')+'>'+td(l)+td(a)+td(b,'w')+'</tr>';
+  const last=o.proj[4];
+  let T='<tr><th>Over 5 years</th><th>Without Turbonomic</th><th class="w">With Turbonomic</th></tr>';
+  T+='<tr class="sec"><td colspan="3">Capacity</td></tr>';
+  T+=row('Months until memory hits the safe ceiling', monthsShort(o.t0,o.STATUS), monthsShort(o.t1,o.STATUSW));
+  T+=row('VMs per host', fmt1(o.densNow), fmt1(o.densWith));
+  T+=row('Hosts bought over 5 years', fmtNum(o.cum.buyWo), fmtNum(o.cum.buyW));
+  T+=row('Hosts licensed in year 5', fmtNum(last.licdWo), fmtNum(last.licdW));
+  T+='<tr class="sec"><td colspan="3">Cost</td></tr>';
+  T+=row('New hosts', fmtUSD(o.cum.capWo), fmtUSD(o.cum.capW));
+  T+=row('VMware license + support', fmtUSD(o.cum.licWo), fmtUSD(o.cum.licW));
+  T+=row('Turbonomic subscription', '$0', fmtUSD(o.cum.turbo));
+  T+=row('Total 5-year cost', fmtUSD(o.totWo), fmtUSD(o.totW), 'tot');
+  document.getElementById('cmpTable').innerHTML=T;
+  const nl=document.getElementById('netline'); nl.className='netline '+signClass(o.net5);
+  const nv=document.getElementById('netlineV'); nv.className='v '+signClass(o.net5);
+  nv.textContent=(o.net5>=0?'Saves ':'Costs ')+fmtUSD(Math.abs(o.net5));
 
-  // split bar
-  const tot=Math.max(1,o.Eliminated+o.Replanned+o.Vdef);
-  const setW=(id,v)=>document.getElementById(id).style.width=(v/tot*100)+'%';
-  setTimeout(()=>{ setW('sg_elim',o.Eliminated); setW('sg_rep',o.Replanned); setW('sg_def',o.Vdef); }, animate?250:0);
-  document.getElementById('lg_elim').textContent=fmtUSD(o.Eliminated);
-  document.getElementById('lg_rep').textContent=fmtUSD(o.Replanned);
-  document.getElementById('lg_def').textContent=fmtUSD(o.Vdef);
-
-  // before/after
-  document.getElementById('ba_wo').textContent=fmtUSD(o.E36);
-  document.getElementById('ba_w').textContent=fmtUSD(o.E36T);
-  const maxBA=Math.max(o.E36,o.E36T,1);
-  setTimeout(()=>{
-    document.getElementById('ba_wo_bar').style.width=(o.E36/maxBA*100)+'%';
-    document.getElementById('ba_w_bar').style.width=(o.E36T/maxBA*100)+'%';
-  }, animate?300:0);
-
-  // hosts & density (Kevin)
+  // density
   document.getElementById('densCap').textContent =
-    'Current estate: '+fmtNum(o.hostsNow)+' hosts of '+fmtNum(o.M)+' GB. Max supportable density at your post-reclaim memory footprint ('+fmt1(o.mImpl1)+' GB consumed/VM at '+Math.round(o.s*100)+'% safe ceiling): '+fmt1(o.densMax)+' VMs/host.';
+    'Today: '+fmtNum(o.H)+' hosts of '+fmtNum(o.M)+' GB, '+fmt1(o.mVM)+' GB used per VM. After a '+Math.round(o.rho*100)+'% reclaim each VM uses '+fmt1(o.mVM1)+' GB, so at '+Math.round(o.tu*100)+'% target utilization a host holds '+fmt1(o.M*o.tu/Math.max(0.0001,o.mVM1))+' VMs.'+(o.dOv>0?(o.dOvClamped?' Density override of '+fmt1(o.dOv)+' is more than a '+fmtNum(o.M)+' GB host can hold; using the physical maximum of '+fmt1(o.densMax)+'.':' Density override in use.'):'');
   document.getElementById('d2_now').textContent=fmt1(o.densNow);
-  document.getElementById('d2_now_d').textContent='VMs/host · '+fmtNum(o.hostsNow)+' hosts';
-  document.getElementById('d2_used').textContent=fmt1(o.densUsed);
-  document.getElementById('d2_used_d').textContent = o.densClamped
-    ? 'VMs/host (target '+fmt1(o.dTarget)+' clamped to memory-feasible max)'
-    : 'VMs/host (seller target)';
+  document.getElementById('d2_now_d').textContent='VMs per host · '+fmtNum(o.H)+' hosts';
+  document.getElementById('d2_with').textContent=fmt1(o.densWith);
+  document.getElementById('d2_with_d').textContent= o.hostsFreed>0 ? 'VMs per host · '+fmtNum(o.hostsW0)+' hosts' : 'already at or above target';
   document.getElementById('d2_freed').textContent=fmtNum(o.hostsFreed);
-  document.getElementById('d2_freed_d').textContent = (o.decom?'decommissioned':'kept as headroom')+' · '+fmtNum(o.hostsWith0)+' hosts remain in use';
-  document.getElementById('d2_run').textContent = (o.STATUS===2||o.STATUS===4||o.t0Turbo>=240) ? '20+ yrs' : fmt1(o.t0Turbo)+' mo';
-  document.getElementById('d2_run_d').textContent = o.decom ? 'after consolidating to '+fmtNum(o.hostsWith0)+' hosts' : 'hosts kept: full capacity + reclaim';
-  // seller-input note under the density field
-  const dn=document.getElementById('densNote');
-  if(dn) dn.textContent = o.densClamped
-    ? 'Note: '+fmt1(o.dTarget)+' VMs/host exceeds what '+fmtNum(o.M)+' GB hosts can safely hold at this estate’s memory footprint. Using '+fmt1(o.densMax)+' VMs/host.'
-    : 'Memory-feasible max at current footprint: '+fmt1(o.densMax)+' VMs/host.';
-  const cn=document.getElementById('coreNote');
-  if(cn) cn.textContent = fmtNum(o.coresHost)+' cores/host. Reference: VCF at $350/core-yr ≈ '+fmtUSD(o.coresHost*350)+'/host-yr; vSphere Foundation at $135/core-yr ≈ '+fmtUSD(o.coresHost*135)+'/host-yr.';
+  document.getElementById('d2_freed_d').textContent= o.hostsFreed>0 ? fmtUSD(o.licSavYr)+' per year in VMware' : 'no consolidation room at this target';
+  document.getElementById('d2_rec').textContent=fmt1(o.Rtb)+' TB';
+  document.getElementById('d2_rec_d').textContent='utilization '+Math.round(o.u*100)+'% → '+Math.round(o.u1*100)+'%';
 
-  // 5-year projection table
-  const P=o.proj;
+  // year table
   const cell=(v,cls)=>'<td'+(cls?' class="'+cls+'"':'')+'>'+v+'</td>';
-  let T='<tr><th>Metric</th><th>Today</th>'+P.map(p=>'<th>Year '+p.y+'</th>').join('')+'</tr>';
-  T+='<tr>'+cell('Total VMs')+cell(fmtNum(o.N0))+P.map(p=>cell(fmtNum(p.vms))).join('')+'</tr>';
-  T+='<tr>'+cell('Hosts needed, without Turbo')+cell(fmtNum(o.hostsNow))+P.map(p=>cell(fmtNum(p.hostsWo))).join('')+'</tr>';
-  T+='<tr>'+cell('Hosts needed, with Turbo')+cell(fmtNum(o.hostsWith0))+P.map(p=>cell(fmtNum(p.hostsW))).join('')+'</tr>';
-  T+='<tr>'+cell('Hosts deferred / freed')+cell(fmtNum(o.hostsFreed))+P.map(p=>cell(fmtNum(p.def))).join('')+'</tr>';
-  T+='<tr>'+cell('Cumulative host CapEx, without Turbo')+cell('$0')+P.map(p=>cell(fmtUSDm(p.cumCapWo),'neg')).join('')+'</tr>';
-  T+='<tr>'+cell('Cumulative host CapEx + Turbo cost, with Turbo')+cell('$0')+P.map(p=>cell(fmtUSDm(p.cumWithAll),'pos')).join('')+'</tr>';
-  T+='<tr>'+cell('Annual VMware license + maintenance savings')+cell('$0')+P.map(p=>cell(fmtUSDm(p.licSav))).join('')+'</tr>';
-  T+='<tr class="netrow">'+cell('Cumulative net savings with Turbo')+cell('$0')+P.map(p=>cell(fmtUSDm(p.cumNet))).join('')+'</tr>';
-  document.getElementById('projTable').innerHTML=T;
+  const P=o.proj;
+  let Y='<tr><th>Year</th><th>Today</th>'+P.map(p=>'<th>Year '+p.y+'</th>').join('')+'</tr>';
+  Y+='<tr>'+cell('Total VMs')+cell(fmtNum(o.N))+P.map(p=>cell(fmtNum(p.vms))).join('')+'</tr>';
+  Y+='<tr class="sec"><td colspan="7">Without Turbonomic</td></tr>';
+  Y+='<tr>'+cell('Memory in use (TB)')+cell(fmt1(o.D0))+P.map(p=>cell(fmt1(p.DyWo))).join('')+'</tr>';
+  Y+='<tr>'+cell('Hosts bought')+cell('0')+P.map(p=>cell(fmtNum(p.buyWo))).join('')+'</tr>';
+  Y+='<tr>'+cell('Hosts licensed')+cell(fmtNum(o.H))+P.map(p=>cell(fmtNum(p.licdWo))).join('')+'</tr>';
+  Y+='<tr>'+cell('Cost that year')+cell('$0')+P.map(p=>cell(fmtUSDm(p.capWo+p.licWo))).join('')+'</tr>';
+  Y+='<tr class="sec"><td colspan="7">With Turbonomic</td></tr>';
+  Y+='<tr>'+cell('Memory in use (TB)')+cell(fmt1(o.D1),'w')+P.map(p=>cell(fmt1(p.DyW),'w')).join('')+'</tr>';
+  Y+='<tr>'+cell('Hosts bought')+cell('0','w')+P.map(p=>cell(fmtNum(p.buyW),'w')).join('')+'</tr>';
+  Y+='<tr>'+cell('Hosts licensed')+cell(fmtNum(o.hostsW0),'w')+P.map(p=>cell(fmtNum(p.licdW),'w')).join('')+'</tr>';
+  Y+='<tr>'+cell('Turbonomic subscription')+cell(fmtUSDm(o.turboYr),'w')+P.map(p=>cell(fmtUSDm(p.tCost),'w')).join('')+'</tr>';
+  Y+='<tr>'+cell('Cost that year')+cell('$0','w')+P.map(p=>cell(fmtUSDm(p.capW+p.licW+p.tCost),'w')).join('')+'</tr>';
+  Y+='<tr class="sec"><td colspan="7">Difference</td></tr>';
+  Y+='<tr>'+cell('Net savings that year')+cell('$0')+P.map(p=>cell(fmtUSDm(p.net),signClass(p.net))).join('')+'</tr>';
+  Y+='<tr class="netrow">'+cell('Cumulative net savings')+cell('$0')+P.map(p=>cell(fmtUSDm(p.cumNet),signClass(p.cumNet))).join('')+'</tr>';
+  document.getElementById('projTable').innerHTML=Y;
 
-  // detailed analysis
-  document.getElementById('d_demand').textContent=fmt1(o.D0)+' TB';
+  // runway detail
+  document.getElementById('runCap').textContent = o.STATUS===1
+    ? 'Memory in use is already past the safe ceiling. Any purchase is immediate; Turbonomic reclaim shrinks it.'
+    : (o.STATUS===2||o.STATUS===4) ? 'At this growth rate memory does not reach the safe ceiling within 20 years.'
+    : 'Safe ceiling reached in '+fmt1(o.t0)+' months (~'+futureDate(o.t0)+') without Turbonomic. Order-by deadline '+fmt1(o.orderBy)+' months ('+futureDate(o.orderBy)+') given a '+fmtNum(o.TL)+'-month lead time.';
+  document.getElementById('d_inst').textContent=fmt1(o.I)+' TB';
   document.getElementById('d_vram').textContent=fmt1(o.V0)+' TB';
-  document.getElementById('d_cap').textContent=fmt1(o.K)+' TB ('+Math.round(o.s*100)+'% of installed)';
+  document.getElementById('d_demand').textContent=fmt1(o.D0)+' TB ('+Math.round(o.u*100)+'%)';
+  document.getElementById('d_cap').textContent=fmt1(o.K)+' TB ('+Math.round(o.s*100)+'%)';
   document.getElementById('d_head').textContent=fmt1(o.headroom)+' TB';
-  document.getElementById('d_grow').textContent='+'+fmt1(o.D0*o.r)+' TB';
-  document.getElementById('d_buy').textContent = o.servers>0 ? fmt1(o.buySize)+' TB · '+fmtNum(o.servers)+' servers' : 'none required';
-  document.getElementById('d_order').textContent = o.STATUS===1 ? 'Order now' : (o.STATUS===2||o.STATUS===4 ? 'n/a' : fmt1(o.orderBy)+' mo');
+  document.getElementById('d_t0').textContent=monthsText(o.t0,o.STATUS);
+  document.getElementById('d_order').textContent= o.STATUS===1?'Order now':(o.STATUS===2||o.STATUS===4?'n/a':fmt1(o.orderBy)+' mo ('+futureDate(o.orderBy)+')');
   document.getElementById('d_reclaim').textContent=fmt1(o.Rtb)+' TB';
-  document.getElementById('d_util1').textContent=Math.round(o.D1/o.I*100)+'%';
-  document.getElementById('d_defer').textContent=fmt1(o.d)+' mo'+(o.dRaw>o.Dcap?' (capped from '+fmt1(o.dRaw)+')':'');
+  document.getElementById('d_d1').textContent=fmt1(o.D1)+' TB';
+  document.getElementById('d_util1').textContent=Math.round(o.u1*100)+'%';
+  document.getElementById('d_t1').textContent=monthsText(o.t1,o.STATUSW);
+  document.getElementById('d_extra').textContent=(o.STATUSW===2||o.STATUSW===4)?'20+ yrs':'+'+fmt1(Math.max(0,o.t1-o.t0))+' mo';
+  document.getElementById('d_hw0').textContent=fmtNum(o.hostsW0)+' of '+fmtNum(o.H);
+  document.getElementById('d_tcost').textContent=fmtUSD(o.turboYr);
 
   // exec message
-  let msg;
-  if(o.STATUS===2||o.STATUS===4){
-    msg='At your current growth, memory is not on track to force an unplanned purchase within the modeled horizon. Turbonomic still reclaims about <b>'+fmt1(o.Rtb)+' TB</b> of capacity you can redeploy.';
-  }else if(o.STATUS===1){
-    msg='Your estate is <b>already beyond</b> its safe memory threshold, implying an immediate '+fmtUSD(o.E)+' purchase. With Turbonomic, reclaim shrinks or removes it — modeled value <b>'+fmtUSD(o.Total)+'</b>.';
+  let msg='';
+  if(o.STATUS===1){
+    msg='Your estate is <b>already past</b> its safe memory ceiling. ';
+  }else if(o.STATUS===2||o.STATUS===4){
+    msg='At your current growth, memory does not hit the safe ceiling within the modeled horizon. ';
   }else{
-    msg='At your current growth you exhaust safe memory in <b>'+fmt1(o.t0)+' months</b>, forcing an unplanned <b>'+fmtUSD(o.E)+'</b> purchase. With Turbonomic you can avoid or defer about <b>'+fmtUSD(o.Total)+'</b> ('+(o.valPct*100).toFixed(0)+'% of that exposure) while extending runway by <b>'+fmt1(o.d)+' months</b>.';
+    msg='Without Turbonomic you hit the safe memory ceiling in <b>'+fmt1(o.t0)+' months</b> and buy <b>'+fmtNum(o.cum.buyWo)+' hosts</b> over 5 years. ';
   }
-  msg += ' Placement optimization at <b>'+fmt1(o.densUsed)+' VMs/host</b> frees <b>'+fmtNum(o.hostsFreed)+'</b> of '+fmtNum(o.hostsNow)+' hosts ('+(o.decom?'decommissioned':'kept as headroom')+'). Year-1 net savings <b>'+fmtUSD(o.y1Net)+'</b>; 5-year cumulative net savings <b>'+fmtUSD(o.net5)+'</b> after VMware license and Turbonomic subscription costs.';
+  msg+='Turbonomic reclaims <b>'+fmt1(o.Rtb)+' TB</b>, pushes the ceiling out to <b>'+monthsShort(o.t1,o.STATUSW)+'</b>, and lets you run <b>'+fmt1(o.densWith)+' VMs per host</b> instead of '+fmt1(o.densNow)+', freeing <b>'+fmtNum(o.hostsFreed)+' hosts</b> today. ';
+  msg+='Over 5 years that avoids <b>'+fmtUSD(o.grossSav)+'</b> in hosts and VMware against <b>'+fmtUSD(o.cum.turbo)+'</b> of Turbonomic subscription, for a net of <b>'+fmtUSD(o.net5)+'</b>.';
+  if(o.net5<0) msg+=' This counts only on-premises server and hypervisor costs; cloud, performance, and labor benefits are not included.';
   document.getElementById('execMsg').innerHTML=msg;
 
   document.getElementById('foot').innerHTML =
-    'Conservative “strict cash” view (eliminated + deferral NPV only): <b>'+fmtUSD(o.strictCash)+'</b>. '+
-    'Reclaim base '+fmt1(o.RecBase)+' TB · post-reclaim utilization '+((o.D1/o.I)*100).toFixed(0)+'%. '+
-    'Partition check: eliminated + re-planned + deferred principal = exposure ('+
-    fmtUSD(o.Eliminated+o.Replanned+o.Pdef)+' = '+fmtUSD(o.E)+').';
+    'Check: 5-year cost without ('+fmtUSD(o.totWo)+') minus 5-year cost with ('+fmtUSD(o.totW)+') = '+fmtUSD(o.net5)+'. '+
+    'Turbonomic price used everywhere: $'+fmt2(o.price)+' per VM per year. Host price held flat at '+fmtUSD(o.C)+'. '+
+    'Both scenarios buy only when memory in use passes '+Math.round(o.s*100)+'% of owned capacity.';
 }
 
 /* ---------------- reveal groups ---------------- */
+const REVEAL=['rv_head','rv_cmp','rv_dens','rv_proj','rv_detail','rv_exec','rv_cta','rv_export'];
 function revealAll(stagger){
-  const ids=['rv_head','rv_tiles','rv_split','rv_ba','rv_dens','rv_proj','rv_detail','rv_exec','rv_cta','rv_export'];
-  ids.forEach((id,i)=>{
-    const el=document.getElementById(id);
-    setTimeout(()=>el.classList.add('in'), stagger?i*110:0);
-  });
+  REVEAL.forEach((id,i)=>{ const el=document.getElementById(id); setTimeout(()=>el.classList.add('in'), stagger?i*110:0); });
 }
 
 /* ---------------- cinematic loader ---------------- */
 const STEPS=[
   'Reading your environment…',
-  'Projecting compounding memory demand…',
-  'Locating your safe-capacity ceiling…',
-  'Modeling Turbonomic reclaim &amp; deferral…',
-  'Optimizing VM-to-host density…',
-  'Projecting 5-year fleet economics…',
-  'Quantifying avoidable spend…'
+  'Projecting memory demand…',
+  'Finding your safe-capacity ceiling…',
+  'Modeling Turbonomic reclaim…',
+  'Consolidating VMs onto fewer hosts…',
+  'Pricing both paths over 5 years…',
+  'Netting out the Turbonomic subscription…'
 ];
 const RING_C=2*Math.PI*42;
 function runLoader(done){
@@ -1037,10 +928,8 @@ function runLoader(done){
   const line=document.getElementById('stepline');
   ring.style.strokeDasharray=RING_C;
   loader.classList.add('show');
-  // hide result groups for re-reveal
-  ['rv_head','rv_tiles','rv_split','rv_ba','rv_dens','rv_proj','rv_detail','rv_exec','rv_cta','rv_export'].forEach(id=>document.getElementById(id).classList.remove('in'));
-  let i=0;
-  const total=STEPS.length;
+  REVEAL.forEach(id=>document.getElementById(id).classList.remove('in'));
+  let i=0; const total=STEPS.length;
   function step(){
     line.style.opacity=0;
     setTimeout(()=>{ line.innerHTML=STEPS[i]; line.style.opacity=1; },160);
@@ -1049,71 +938,94 @@ function runLoader(done){
     bar.style.width=(p*100)+'%';
     pct.textContent=Math.round(p*100)+'%';
     i++;
-    if(i<total){ setTimeout(step, 560); }
-    else{
-      setTimeout(()=>{
-        loader.classList.remove('show');
-        done && done();
-      }, 520);
-    }
+    if(i<total){ setTimeout(step, 520); }
+    else{ setTimeout(()=>{ loader.classList.remove('show'); done && done(); }, 480); }
   }
   step();
 }
 
 /* ---------------- input wiring ---------------- */
-const PCT_KEYS={growth:'v_growth',util:'v_util',rho:'v_rho',safe:'v_safe',disp:'v_disp',wacc:'v_wacc'};
+const PCT_KEYS={util:'v_util',growth:'v_growth',disc:'v_disc',rho:'v_rho',safe:'v_safe',tutil:'v_tutil',active:'v_active'};
 function syncValueLabels(){
   for(const k in PCT_KEYS){
     const el=document.getElementById(PCT_KEYS[k]);
     if(el && document.activeElement!==el) el.value=Math.round(state[k]);
   }
 }
+function setTag(k, v){
+  src[k]=v;
+  document.querySelectorAll('[data-tag="'+k+'"]').forEach(t=>{ t.className='tag '+v; t.textContent=v==='c'?'From customer':'Our estimate'; });
+}
+function markCustomer(k){ if(TAGGABLE.includes(k) && src[k]!=='c') setTag(k,'c'); }
 function readControl(target){
   const host=target.closest('[data-key]'); if(!host) return false;
   const key=host.getAttribute('data-key');
   let v=parseFloat(host.value);
-  // typed into the slider's text field: the inner input carries the freshest value
   if(target!==host && target.value!==undefined && target.value!==''){
-    const tv=parseFloat(target.value);
-    if(!isNaN(tv)) v=tv;
+    const tv=parseFloat(target.value); if(!isNaN(tv)) v=tv;
   }
   if(isNaN(v)) return false;
+  if(key==='hosts'){ if(state.hostsAuto) return false; }
+  if(state[key]===v) return false;
   state[key]=v;
+  markCustomer(key);
   return true;
 }
 let liveTimer=null;
 function liveUpdate(){
   clearTimeout(liveTimer);
-  liveTimer=setTimeout(()=>{ syncValueLabels(); render(calcModel(state), false); revealAll(false); }, 90);
+  liveTimer=setTimeout(()=>{ syncValueLabels(); render(calcModel(state), false); revealAll(false); save(); }, 90);
+}
+function applyStateToDOM(){
+  document.querySelectorAll('[data-key]').forEach(el=>{ const k=el.getAttribute('data-key'); if(k in state) el.value=String(state[k]); });
+  document.getElementById('hostsAuto').checked=!!state.hostsAuto;
+  TAGGABLE.forEach(k=>setTag(k,src[k]));
+  syncValueLabels();
 }
 function bindInputs(){
   const root=document.getElementById('inputs');
   ['input','change','cds-number-input','cds-slider-changed','cds-slider-input-changed'].forEach(evt=>{
     root.addEventListener(evt, e=>{ if(readControl(e.target)) liveUpdate(); }, true);
   });
+  // info buttons
+  root.querySelectorAll('.info').forEach(b=>b.addEventListener('click', e=>{ e.preventDefault(); b.closest('.field').classList.toggle('open'); reportHeight(); }));
+  // tags
+  root.querySelectorAll('.tag[data-tag]').forEach(t=>t.addEventListener('click', ()=>{ const k=t.getAttribute('data-tag'); setTag(k, src[k]==='c'?'e':'c'); save(); }));
+  // hosts auto
+  const ha=document.getElementById('hostsAuto');
+  ha.addEventListener('change', ()=>{
+    state.hostsAuto=ha.checked?1:0;
+    if(!ha.checked){ state.hosts=autoHosts(state); document.getElementById('i_hosts').value=String(state.hosts); }
+    else setTag('hosts','e');
+    liveUpdate();
+  });
+  // typing into the hosts field turns Auto off
+  document.getElementById('i_hosts').addEventListener('input', e=>{
+    if(state.hostsAuto){ const v=parseFloat(e.target.value); if(!isNaN(v)&&v>0){ state.hostsAuto=0; ha.checked=false; state.hosts=v; markCustomer('hosts'); liveUpdate(); } }
+  }, true);
   document.getElementById('calcBtn').addEventListener('click', ()=>{
     syncValueLabels();
     runLoader(()=>{ render(calcModel(state), true); revealAll(true); reportHeight(); });
   });
-  document.getElementById('resetBtn').addEventListener('click', ()=>{
-    state={...DEFAULTS};
-    // reset control values in the DOM
-    document.querySelectorAll('[data-key]').forEach(el=>{ const k=el.getAttribute('data-key'); if(k in state) el.value=String(state[k]); });
-    const tgr=document.getElementById('i_decom'); if(tgr) tgr.checked=false;
-    syncValueLabels();
-    runLoader(()=>{ render(calcModel(state), true); revealAll(true); });
-  });
+  const doReset=()=>{
+    state={...DEFAULTS}; TAGGABLE.forEach(k=>src[k]='e');
+    try{ localStorage.removeItem(STORE); }catch(e){}
+    document.getElementById('restored').classList.remove('show');
+    applyStateToDOM();
+    runLoader(()=>{ render(calcModel(state), true); revealAll(true); reportHeight(); });
+  };
+  document.getElementById('resetBtn').addEventListener('click', doReset);
+  document.getElementById('restoredReset').addEventListener('click', doReset);
   document.getElementById('pdfBtn').addEventListener('click', ()=>{ buildPrintReport(); window.print(); });
   document.getElementById('csvBtn').addEventListener('click', downloadCSV);
+  document.getElementById('shareBtn').addEventListener('click', ()=>{
+    const url=shareURL();
+    const show=()=>{ const c=document.getElementById('copied'); c.classList.add('show'); setTimeout(()=>c.classList.remove('show'),2200); };
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(show, ()=>window.prompt('Copy this link:',url)); }
+    else window.prompt('Copy this link:',url);
+  });
   window.addEventListener('beforeprint', buildPrintReport);
-  // freed-hosts disposition toggle (keep as headroom <-> decommission)
-  const tg=document.getElementById('i_decom');
-  if(tg){
-    const readToggle=()=>{ setTimeout(()=>{ const v=tg.checked?1:0; if(v!==state.decom){ state.decom=v; liveUpdate(); } },0); };
-    tg.addEventListener('cds-toggle-changed', readToggle);
-    tg.addEventListener('click', readToggle);
-  }
-  // editable blue value fields: typing updates the model and moves the slider
+  // editable blue value fields
   document.querySelectorAll('.val-in').forEach(inp=>{
     inp.addEventListener('input', ()=>{
       const k=inp.getAttribute('data-vkey');
@@ -1121,9 +1033,10 @@ function bindInputs(){
       const sl=document.querySelector('[data-key="'+k+'"]');
       const min=parseFloat(sl.getAttribute('min')), max=parseFloat(sl.getAttribute('max'));
       v=Math.min(max,Math.max(min,v));
-      state[k]=v; sl.value=String(v);
+      if(state[k]!==v){ state[k]=v; markCustomer(k); }
+      sl.value=String(v);
       clearTimeout(liveTimer);
-      liveTimer=setTimeout(()=>{ render(calcModel(state), false); revealAll(false); }, 90);
+      liveTimer=setTimeout(()=>{ render(calcModel(state), false); revealAll(false); save(); }, 90);
     });
     inp.addEventListener('blur', ()=>{ inp.value=Math.round(state[inp.getAttribute('data-vkey')]); });
     inp.addEventListener('keydown', e=>{ if(e.key==='Enter') inp.blur(); });
@@ -1131,130 +1044,115 @@ function bindInputs(){
 }
 
 /* ---------------- export: PDF report + CSV data ---------------- */
-const INPUT_DEFS=[
-  ['Total VMs','vms',''],['Avg configured vRAM per VM','gb','GB'],['Annual growth','growth','%'],
-  ['Current memory utilization','util','%'],['Total installed memory','inst','TB'],
-  ['Max safe utilization','safe','%'],['Avg cost per server','cost','$'],['Memory per server','mps','GB'],
-  ['Hardware purchase cycle','cycle','years'],['Hardware lead time','lead','months'],
-  ['Unplanned buy displacing planned refresh','disp','%'],['Turbonomic memory reclaim','rho','%'],
-  ['Refresh deferral cap','defcap','months'],['Purchase coverage window','win','months'],['Cost of capital','wacc','%'],
-  ['Turbo-optimized VM density target','density','VMs/host'],['Decommission freed hosts (1=yes)','decom',''],
-  ['CPUs per server','cpus',''],['Cores per CPU','corespc',''],
-  ['VMware license per host','vmwlic','$/yr'],['VMware maintenance per host','vmwmaint','$/yr'],
-  ['Turbonomic cost per VM','turbovm','$/yr']
-];
-function monthsText(o){ return o.STATUS===1?'0 (over now)':(o.STATUS===2||o.STATUS===4?'20+ years':fmt1(o.t0)+' months'); }
+function inputValueText(d){
+  const v = d[1]==='hosts' ? (state.hostsAuto?autoHosts(state):state.hosts) : state[d[1]];
+  if(d[2]==='%') return v+'%';
+  if(d[2]==='$') return '$'+Number(v).toLocaleString('en-US',{maximumFractionDigits:2});
+  if(d[2]==='$/yr') return '$'+Number(v).toLocaleString('en-US')+' per year';
+  return Number(v).toLocaleString('en-US')+(d[2]?' '+d[2]:'');
+}
+function tagHTML(k){
+  if(!TAGGABLE.includes(k)) return '';
+  if(k==='hosts' && state.hostsAuto) return '<span class="pr-tag e">Auto estimate</span>';
+  return src[k]==='c'?'<span class="pr-tag c">From customer</span>':'<span class="pr-tag e">Our estimate</span>';
+}
 function buildPrintReport(){
   const o=calcModel(state);
   const today=new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
-  const inputRows=INPUT_DEFS.map(d=>{
-    const v=state[d[1]];
-    const val=d[2]==='%'?v+'%':(d[2]==='$'?'$'+Number(v).toLocaleString('en-US'):Number(v).toLocaleString('en-US')+(d[2]?' '+d[2]:''));
-    return '<tr><td>'+d[0]+'</td><td>'+val+'</td></tr>';
-  }).join('');
-  const R=(l,v)=>'<tr><td>'+l+'</td><td>'+v+'</td></tr>';
-  const resultRows=
-    R('Months to safe-capacity exhaustion',monthsText(o))+
-    R('Order-by deadline',o.STATUS===1?'Order now':(o.STATUS===2||o.STATUS===4?'n/a':fmt1(o.orderBy)+' months'))+
-    R('Consumed memory demand',fmt1(o.D0)+' TB')+
-    R('Configured vRAM',fmt1(o.V0)+' TB')+
-    R('Safe capacity',fmt1(o.K)+' TB')+
-    R('Remaining safe headroom',fmt1(o.headroom)+' TB')+
-    R('Unplanned buy size',fmt1(o.buySize)+' TB / '+fmtNum(o.servers)+' servers')+
-    R('Unplanned CapEx exposure',fmtUSD(o.E))+
-    R('Reclaimed capacity',fmt1(o.Rtb)+' TB')+
-    R('Post-reclaim utilization',Math.round(o.D1/o.I*100)+'%')+
-    R('Achieved refresh deferral',fmt1(o.d)+' months'+(o.dRaw>o.Dcap?' (capped from '+fmt1(o.dRaw)+')':''))+
-    R('Purchases eliminated',fmtUSD(o.Eliminated))+
-    R('Re-planned into refresh budget',fmtUSD(o.Replanned))+
-    R('Deferral value (NPV)',fmtUSD(o.Vdef))+
-    R('Total Turbonomic value',fmtUSD(o.Total)+' ('+(o.valPct*100).toFixed(0)+'% of exposure)')+
-    R('Strict cash view (eliminated + NPV)',fmtUSD(o.strictCash))+
-    R('36-month exposure without Turbonomic',fmtUSD(o.E36))+
-    R('36-month exposure with Turbonomic',fmtUSD(o.E36T))+
-    R('Current VM density',fmt1(o.densNow)+' VMs/host ('+fmtNum(o.hostsNow)+' hosts)')+
-    R('Density with Turbonomic',fmt1(o.densUsed)+' VMs/host'+(o.densClamped?' (clamped)':''))+
-    R('Hosts freed by Turbonomic',fmtNum(o.hostsFreed)+' ('+(o.decom?'decommissioned':'kept as headroom')+')')+
-    R('Year-1 net savings (fleet economics)',fmtUSD(o.y1Net))+
-    R('5-year cumulative net savings',fmtUSD(o.net5));
+  const inputRows=INPUT_DEFS.map(d=>'<tr><td>'+d[0]+'</td><td class="n b">'+inputValueText(d)+'</td><td>'+tagHTML(d[1])+'</td></tr>').join('');
+  const R=(l,a,b,cls)=>'<tr'+(cls?' class="'+cls+'"':'')+'><td>'+l+'</td><td class="n">'+a+'</td><td class="n b">'+b+'</td></tr>';
+  const last=o.proj[4];
+  const cmpRows=
+    '<tr><th></th><th class="n">Without</th><th class="n">With Turbonomic</th></tr>'+
+    R('Months until safe ceiling',monthsShort(o.t0,o.STATUS),monthsShort(o.t1,o.STATUSW))+
+    R('VMs per host',fmt1(o.densNow),fmt1(o.densWith))+
+    R('Hosts bought over 5 years',fmtNum(o.cum.buyWo),fmtNum(o.cum.buyW))+
+    R('Hosts licensed in year 5',fmtNum(last.licdWo),fmtNum(last.licdW))+
+    R('New hosts (5 yr)',fmtUSD(o.cum.capWo),fmtUSD(o.cum.capW))+
+    R('VMware license + support (5 yr)',fmtUSD(o.cum.licWo),fmtUSD(o.cum.licW))+
+    R('Turbonomic subscription (5 yr)','$0',fmtUSD(o.cum.turbo))+
+    R('Total 5-year cost',fmtUSD(o.totWo),fmtUSD(o.totW),'tot');
+  const yrRows='<tr><th></th>'+o.proj.map(p=>'<th class="n">Year '+p.y+'</th>').join('')+'</tr>'+
+    '<tr><td>Net savings that year</td>'+o.proj.map(p=>'<td class="n">'+fmtUSD(p.net)+'</td>').join('')+'</tr>'+
+    '<tr class="tot"><td>Cumulative net savings</td>'+o.proj.map(p=>'<td class="n">'+fmtUSD(p.cumNet)+'</td>').join('')+'</tr>';
   document.getElementById('printReport').innerHTML=
     '<div class="pr-top"><span class="brand">IBM Turbonomic</span><span class="date">Generated '+today+'</span></div>'+
     '<h1>Infrastructure Capacity &amp; Reclamation Report</h1>'+
-    '<p class="sub">Directional estimate based on customer-provided inputs and a compounding capacity model.</p>'+
+    '<p class="sub">Directional 5-year estimate based on the inputs below. Every dollar figure includes the Turbonomic subscription at $'+fmt2(o.price)+' per VM per year.</p>'+
     '<div class="pr-kpis">'+
-      '<div class="pr-kpi"><div class="k">Months to exhaustion</div><div class="v">'+monthsText(o)+'</div></div>'+
-      '<div class="pr-kpi"><div class="k">Unplanned CapEx exposure</div><div class="v">'+fmtUSD(o.E)+'</div></div>'+
-      '<div class="pr-kpi"><div class="k">Total Turbonomic value</div><div class="v">'+fmtUSD(o.Total)+'</div></div>'+
-      '<div class="pr-kpi"><div class="k">Runway extension</div><div class="v">'+fmt1(o.d)+' mo</div></div>'+
+      '<div class="pr-kpi"><div class="k">1-year net savings</div><div class="v">'+fmtUSD(o.net1)+'</div></div>'+
+      '<div class="pr-kpi"><div class="k">3-year net savings</div><div class="v">'+fmtUSD(o.net3)+'</div></div>'+
+      '<div class="pr-kpi"><div class="k">5-year net savings</div><div class="v">'+fmtUSD(o.net5)+'</div></div>'+
+      '<div class="pr-kpi"><div class="k">Memory runway, without → with</div><div class="v">'+monthsShort(o.t0,o.STATUS)+' → '+monthsShort(o.t1,o.STATUSW)+'</div></div>'+
     '</div>'+
     '<div class="pr-exec">'+document.getElementById('execMsg').innerHTML+'</div>'+
     '<div class="pr-grid">'+
-      '<div class="half"><h2>Inputs</h2><table class="pr-table">'+inputRows+'</table></div>'+
-      '<div class="half"><h2>Results</h2><table class="pr-table">'+resultRows+'</table></div>'+
+      '<div class="half"><h2>Inputs</h2><table class="pr-table"><tr><th>Field</th><th class="n">Value</th><th>Source</th></tr>'+inputRows+'</table></div>'+
+      '<div class="half"><h2>Before and after, 5 years</h2><table class="pr-table">'+cmpRows+'</table>'+
+      '<h2>Year by year</h2><table class="pr-table">'+yrRows+'</table></div>'+
     '</div>'+
-    '<div class="pr-foot">Estimates are directional and for planning discussion only; not a commitment of results, pricing, or savings. Dollar figures are valued at the modeled purchase date; deferral value is the NPV of postponing that outflow. Reclaim is bounded by the lesser of configured vRAM and consumed memory. CFO partition: eliminated + re-planned + deferred principal = exposure exactly.</div>';
+    '<div class="pr-foot">Estimates are directional and for planning discussion only; not a commitment of results, pricing, or savings. Counts on-premises server and hypervisor costs only; cloud, performance, labor and outage benefits are not included. Host price held flat for 5 years. Both scenarios buy hosts only when memory in use passes '+Math.round(o.s*100)+'% of owned capacity. “From customer” marks values the customer supplied; “Our estimate” marks assumptions.</div>';
 }
 function csvEscape(s){ s=String(s); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
 function downloadCSV(){
   const o=calcModel(state);
-  const rows=[['Section','Field','Value','Unit']];
-  rows.push(['Meta','Generated',new Date().toISOString().slice(0,10),'']);
-  rows.push(['Meta','Tool','IBM Turbonomic Infrastructure Capacity & Reclamation Calculator','']);
-  INPUT_DEFS.forEach(d=>rows.push(['Input',d[0],state[d[1]],d[2]]));
-  const O=(f,v,u)=>rows.push(['Result',f,v,u||'']);
-  O('Months to exhaustion (t0)',(o.STATUS===2||o.STATUS===4)?'240+':o.t0.toFixed(2),'months');
-  O('Status code',o.STATUS,'0 ok / 1 over / 2 no-growth / 3 window missed / 4 beyond horizon');
-  O('Order-by deadline',o.orderBy.toFixed(2),'months');
-  O('Consumed demand D0',o.D0.toFixed(1),'TB');
-  O('Configured vRAM V0',o.V0.toFixed(1),'TB');
-  O('Safe capacity K',o.K.toFixed(1),'TB');
-  O('Remaining safe headroom',o.headroom.toFixed(1),'TB');
-  O('Unplanned buy size',o.buySize.toFixed(1),'TB');
-  O('Servers to buy',o.servers,'servers');
-  O('Unplanned CapEx exposure',Math.round(o.E),'USD');
-  O('Reclaimed capacity',o.Rtb.toFixed(1),'TB');
-  O('Post-reclaim demand D1',o.D1.toFixed(1),'TB');
-  O('Post-reclaim exhaustion t1',(o.t1>=240?'240+':o.t1.toFixed(2)),'months');
-  O('Model-derived deferral (raw)',o.dRaw.toFixed(2),'months');
-  O('Achieved deferral (capped)',o.d.toFixed(2),'months');
-  O('Turbonomic-case CapEx E1',Math.round(o.E1),'USD');
-  O('Purchases eliminated',Math.round(o.Eliminated),'USD');
-  O('Re-planned into refresh budget',Math.round(o.Replanned),'USD');
-  O('Deferred principal',Math.round(o.Pdef),'USD');
-  O('Deferral value (NPV)',Math.round(o.Vdef),'USD');
-  O('Total Turbonomic value',Math.round(o.Total),'USD');
-  O('Value as % of exposure',(o.valPct*100).toFixed(1),'%');
-  O('Strict cash view',Math.round(o.strictCash),'USD');
-  O('36-month exposure without Turbonomic',Math.round(o.E36),'USD');
-  O('36-month exposure with Turbonomic',Math.round(o.E36T),'USD');
-  O('Current hosts',o.hostsNow,'hosts');
-  O('Current VM density',o.densNow.toFixed(2),'VMs/host');
-  O('Memory-feasible max density',o.densMax.toFixed(2),'VMs/host');
-  O('Density used (with Turbo)',o.densUsed.toFixed(2),'VMs/host'+(o.densClamped?' (target clamped)':''));
-  O('Hosts needed with Turbo (today)',o.hostsWith0,'hosts');
-  O('Hosts freed by Turbo',o.hostsFreed,o.decom?'decommissioned':'kept as headroom');
-  O('Post-Turbo exhaustion',(o.t0Turbo>=240?'240+':o.t0Turbo.toFixed(2)),'months');
-  O('Year-1 net savings',Math.round(o.y1Net),'USD');
-  O('3-year cumulative net savings',Math.round(o.net3),'USD');
-  O('5-year cumulative net savings',Math.round(o.net5),'USD');
-  O('5-year cumulative Turbonomic cost',Math.round(o.cumTurbo),'USD');
-  O('5-year ROI (gross savings / Turbo cost)',o.roi5.toFixed(2),'x');
-  o.proj.forEach(p=>{
-    const Y=(f,v,u2)=>rows.push(['Projection Y'+p.y,f,v,u2||'']);
-    Y('Total VMs',p.vms,'VMs');
-    Y('Hosts needed without Turbo',p.hostsWo,'hosts');
-    Y('Hosts needed with Turbo',p.hostsW,'hosts');
-    Y('Hosts deferred/freed',p.def,'hosts');
-    Y('Cumulative host CapEx without Turbo',Math.round(p.cumCapWo),'USD');
-    Y('Cumulative host CapEx + Turbo cost with Turbo',Math.round(p.cumWithAll),'USD');
-    Y('Annual VMware license + maintenance savings',Math.round(p.licSav),'USD');
-    Y('Cumulative net savings with Turbo',Math.round(p.cumNet),'USD');
+  const rows=[['Section','Field','Value','Unit','Source']];
+  rows.push(['Meta','Generated',new Date().toISOString().slice(0,10),'','']);
+  rows.push(['Meta','Tool','IBM Turbonomic Infrastructure Capacity & Reclamation Calculator (v4)','','']);
+  INPUT_DEFS.forEach(d=>{
+    const v = d[1]==='hosts' ? (state.hostsAuto?autoHosts(state):state.hosts) : state[d[1]];
+    const s = !TAGGABLE.includes(d[1]) ? '' : (d[1]==='hosts'&&state.hostsAuto ? 'auto estimate' : (src[d[1]]==='c'?'customer':'estimate'));
+    rows.push(['Input',d[0],v,d[2],s]);
   });
-  const csv='\ufeff'+rows.map(r=>r.map(csvEscape).join(',')).join('\r\n');
+  const O=(f,v,u)=>rows.push(['Result',f,v,u||'','']);
+  O('Effective Turbonomic price per VM per year',o.price.toFixed(2),'USD');
+  O('Hosts',o.H,'hosts');
+  O('Memory installed',o.I.toFixed(1),'TB');
+  O('Memory assigned to VMs',o.V0.toFixed(1),'TB');
+  O('Memory in use',o.D0.toFixed(1),'TB');
+  O('Safe ceiling',o.K.toFixed(1),'TB');
+  O('Months until ceiling, without Turbonomic',(o.STATUS===2||o.STATUS===4)?'240+':o.t0.toFixed(2),'months');
+  O('Order-by deadline',o.orderBy.toFixed(2),'months');
+  O('Memory reclaimed',o.Rtb.toFixed(1),'TB');
+  O('Memory in use after reclaim',o.D1.toFixed(1),'TB');
+  O('Months until ceiling, with Turbonomic',(o.STATUSW===2||o.STATUSW===4)?'240+':o.t1.toFixed(2),'months');
+  O('VMs per host today',o.densNow.toFixed(2),'VMs/host');
+  O('VMs per host with Turbonomic',o.densWith.toFixed(2),'VMs/host');
+  O('Hosts needed with Turbonomic today',o.hostsW0,'hosts');
+  O('Hosts freed today',o.hostsFreed,'hosts');
+  O('Hosts bought over 5 years, without',o.cum.buyWo,'hosts');
+  O('Hosts bought over 5 years, with',o.cum.buyW,'hosts');
+  O('5-year new host cost, without',Math.round(o.cum.capWo),'USD');
+  O('5-year new host cost, with',Math.round(o.cum.capW),'USD');
+  O('5-year VMware cost, without',Math.round(o.cum.licWo),'USD');
+  O('5-year VMware cost, with',Math.round(o.cum.licW),'USD');
+  O('5-year Turbonomic subscription',Math.round(o.cum.turbo),'USD');
+  O('5-year total cost, without',Math.round(o.totWo),'USD');
+  O('5-year total cost, with',Math.round(o.totW),'USD');
+  O('1-year net savings',Math.round(o.net1),'USD');
+  O('3-year net savings',Math.round(o.net3),'USD');
+  O('5-year net savings',Math.round(o.net5),'USD');
+  O('Infrastructure saved per $1 of Turbonomic (5 yr)',o.roi5.toFixed(2),'x');
+  o.proj.forEach(p=>{
+    const Y=(f,v,u2)=>rows.push(['Year '+p.y,f,v,u2||'','']);
+    Y('Total VMs',p.vms,'VMs');
+    Y('Memory in use without',p.DyWo.toFixed(1),'TB');
+    Y('Memory in use with',p.DyW.toFixed(1),'TB');
+    Y('Hosts bought without',p.buyWo,'hosts');
+    Y('Hosts bought with',p.buyW,'hosts');
+    Y('Hosts licensed without',p.licdWo,'hosts');
+    Y('Hosts licensed with',p.licdW,'hosts');
+    Y('Cost without',Math.round(p.capWo+p.licWo),'USD');
+    Y('Turbonomic subscription',Math.round(p.tCost),'USD');
+    Y('Cost with',Math.round(p.capW+p.licW+p.tCost),'USD');
+    Y('Net savings that year',Math.round(p.net),'USD');
+    Y('Cumulative net savings',Math.round(p.cumNet),'USD');
+  });
+  const csv='﻿'+rows.map(r=>r.map(csvEscape).join(',')).join('\r\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
-  a.download='turbonomic-memory-calculator-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.download='turbonomic-capacity-calculator-'+new Date().toISOString().slice(0,10)+'.csv';
   document.body.appendChild(a); a.click();
   setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},1000);
 }
@@ -1268,10 +1166,12 @@ window.addEventListener('resize', reportHeight);
 /* ---------------- init ---------------- */
 function init(){
   if(new URLSearchParams(location.search).get('embed')==='1') document.body.classList.add('embed');
+  const fromURL=loadURL();
+  if(!fromURL){ const restored=loadSaved(); if(restored) document.getElementById('restored').classList.add('show'); }
+  else { state.hostsAuto = new URLSearchParams(location.search).has('hosts') ? 0 : state.hostsAuto; }
   bindInputs();
-  syncValueLabels();
-  render(calcModel(state), false); // instant paint (no anim) as a base
-  // then play the cinematic reveal once controls have likely upgraded
+  applyStateToDOM();
+  render(calcModel(state), false);
   setTimeout(()=>{ runLoader(()=>{ render(calcModel(state), true); revealAll(true); reportHeight(); }); }, 400);
   setInterval(reportHeight, 1000);
 }
