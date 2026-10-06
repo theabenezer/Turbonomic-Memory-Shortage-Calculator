@@ -380,11 +380,9 @@
 
         <div class="field" data-field="turbovm">
           <div class="row"><div class="lab"><label for="i_turbovm">Turbonomic price per VM per year ($)</label><button class="info" type="button" aria-label="About this field">i</button><span class="tag e" data-tag="turbovm">Our estimate</span></div></div>
-          <span class="hint">List $268.80 · IDIQ $241.92. Enter your deal price, or apply a discount below.</span>
-          <div class="infobox">The subscription price per VM per year. <b>Default:</b> $241.92 (IDIQ). <b>Used for:</b> the Turbonomic cost in every dollar figure on this page, every year, on that year's VM count. There is no number on the page that ignores it.</div>
+          <span class="hint">List $268.80 · IDIQ $241.92. Enter your deal price.</span>
+          <div class="infobox">The subscription price per VM per year. <b>Default:</b> $241.92 (IDIQ). Type your actual deal price here. <b>Used for:</b> the Turbonomic cost in every dollar figure on this page, every year, on that year's VM count. There is no number on the page that ignores it.</div>
           <cds-number-input id="i_turbovm" data-key="turbovm" value="241.92" min="0" step="10" label="" hide-label="true"></cds-number-input>
-          <div class="row" style="margin-top:12px"><div class="lab"><label>Discount</label></div><span class="val"><input class="val-in" id="v_disc" data-vkey="disc" type="number" min="0" max="90" step="5" value="0" inputmode="numeric" aria-label="Discount percent">%</span></div>
-          <cds-slider data-key="disc" min="0" max="90" step="5" value="0" label-text="" hide-label="true" hide-text-input="true"><cds-slider-input aria-label="disc" type="number"></cds-slider-input></cds-slider>
           <div class="pricenote" id="priceNote">—</div>
         </div>
 
@@ -626,8 +624,7 @@ function calcModel(x){
   const H=x.hostsAuto?autoHosts(x):Math.max(1,Math.round(x.hosts));
   const C=Math.max(0,x.cost), TL=Math.max(0,x.lead);
   const rho=Math.max(0,Math.min(0.9,x.rho/100));
-  const disc=Math.max(0,Math.min(100,x.disc||0));
-  const price=Math.max(0,x.turbovm)*(1-disc/100);
+  const price=Math.max(0,x.turbovm);
   const licHost=Math.max(0,x.vmwlic)+Math.max(0,x.vmwmaint);
   const dOv=Math.max(0,x.densOv||0);
   const coresHost=Math.max(1,x.cpus)*Math.max(1,x.corespc);
@@ -679,7 +676,7 @@ function calcModel(x){
   const roi5=cum.turbo>0?grossSav/cum.turbo:0;
   const turboYr=N*price;
   const licSavYr=hostsFreed*licHost;
-  return {N,g,r,u,s,tu,M,H,C,TL,rho,price,disc,licHost,dOv,coresHost,hostsAuto:!!x.hostsAuto,
+  return {N,g,r,u,s,tu,M,H,C,TL,rho,price,licHost,dOv,coresHost,hostsAuto:!!x.hostsAuto,
     I,D0,V0,K,headroom,conflict,mVM,t0,STATUS,orderBy,RecBase,Rtb,D1,mVM1,u1,t1,STATUSW,
     densNow,densMax,dOvUsed,dOvClamped,hostsW0,densWith,hostsFreed,capHost,proj,cum,net1,net3,net5,totWo,totW,grossSav,roi5,turboYr,licSavYr};
 }
@@ -706,7 +703,7 @@ function futureDate(months){
 }
 
 /* ---------------- state ---------------- */
-const DEFAULTS = {vms:25000,gb:16,hosts:782,hostsAuto:1,mps:512,util:75,growth:10,cost:35000,turbovm:241.92,disc:0,rho:20,
+const DEFAULTS = {vms:25000,gb:16,hosts:782,hostsAuto:1,mps:512,util:75,growth:10,cost:35000,turbovm:241.92,rho:20,
   safe:85,tutil:70,active:75,lead:6,densOv:0,vmwlic:8500,vmwmaint:1750,cpus:2,corespc:20};
 const TAGGABLE=['vms','gb','hosts','mps','util','growth','cost','turbovm','rho','safe','tutil','active','lead','densOv','vmwlic','vmwmaint'];
 const STEP1=['vms','gb','hosts','mps','util','growth','cost','turbovm','rho'];
@@ -717,7 +714,7 @@ const STORE='turboCalcV4';
 const INPUT_DEFS=[
   ['Total VMs','vms',''],['Avg memory assigned per VM','gb','GB'],['Number of hosts','hosts','hosts'],['Memory per host','mps','GB'],
   ['Current memory utilization','util','%'],['Annual growth','growth','%'],['Cost per new host','cost','$'],
-  ['Turbonomic price per VM per year','turbovm','$'],['Discount','disc','%'],['Turbonomic memory reclaim','rho','%'],
+  ['Turbonomic price per VM per year','turbovm','$'],['Turbonomic memory reclaim','rho','%'],
   ['Safe ceiling','safe','%'],['Target utilization after consolidation','tutil','%'],['Share of assigned memory in use','active','%'],
   ['Hardware lead time','lead','months'],['Density override','densOv','VMs/host'],
   ['VMware license per host','vmwlic','$/yr'],['VMware support per host','vmwmaint','$/yr'],['CPUs per host','cpus',''],['Cores per CPU','corespc','']
@@ -774,7 +771,7 @@ function render(o, animate){
     ? 'Estimated from your VM count. Turn Auto off to type the real number.'
     : 'Physical servers running the VMs.';
   document.getElementById('instHint').textContent = fmtNum(o.H)+' hosts × '+fmtNum(o.M)+' GB = '+fmt1(o.I)+' TB installed · '+fmt1(o.D0)+' TB in use at '+Math.round(o.u*100)+'%';
-  document.getElementById('priceNote').textContent = (o.disc>0?'$'+fmt2(o.price)+' per VM after '+Math.round(o.disc)+'% discount · ':'$'+fmt2(o.price)+' per VM · ')+fmtUSD(o.turboYr)+' per year for '+fmtNum(o.N)+' VMs';
+  document.getElementById('priceNote').textContent = '$'+fmt2(o.price)+' per VM · '+fmtUSD(o.turboYr)+' per year for '+fmtNum(o.N)+' VMs';
   const cn=document.getElementById('coreNote');
   if(cn) cn.textContent = fmtNum(o.coresHost)+' cores per host. Reference: VCF at $350/core-yr ≈ '+fmtUSD(o.coresHost*350)+'/host-yr; vSphere Foundation at $135/core-yr ≈ '+fmtUSD(o.coresHost*135)+'/host-yr.';
 
@@ -945,7 +942,7 @@ function runLoader(done){
 }
 
 /* ---------------- input wiring ---------------- */
-const PCT_KEYS={util:'v_util',growth:'v_growth',disc:'v_disc',rho:'v_rho',safe:'v_safe',tutil:'v_tutil',active:'v_active'};
+const PCT_KEYS={util:'v_util',growth:'v_growth',rho:'v_rho',safe:'v_safe',tutil:'v_tutil',active:'v_active'};
 function syncValueLabels(){
   for(const k in PCT_KEYS){
     const el=document.getElementById(PCT_KEYS[k]);
